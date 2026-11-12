@@ -8,7 +8,7 @@ func testField(t *testing.T, text string) field {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := Normalize(text)
+	n := normalize(text)
 	return field{norm: n, skip: ix.articleSkip(n)}
 }
 
@@ -33,26 +33,26 @@ func TestMatchFieldTiers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tier, _ := matchField(f, newQuery(tt.q, DefaultMaxTokens), TierAnyOrder, false)
+			tier, _ := matchField(f, newQuery(tt.q, defaultMaxTokens), TierAnyOrder, false)
 			eq(t, tier, tt.want)
 		})
 	}
 }
 
 func TestMatchFieldEmpty(t *testing.T) {
-	tier, hits := matchField(field{}, newQuery("ab", DefaultMaxTokens), TierAnyOrder, true)
+	tier, hits := matchField(field{}, newQuery("ab", defaultMaxTokens), TierAnyOrder, true)
 	eq(t, tier, Tier(0))
 	eq(t, len(hits), 0)
 }
 
 func TestMatchFieldAnyOrderLongestFirst(t *testing.T) {
-	tier, hits := matchField(testField(t, "Matrix Man"), newQuery("ma mat", DefaultMaxTokens), TierAnyOrder, true)
+	tier, hits := matchField(testField(t, "Matrix Man"), newQuery("ma mat", defaultMaxTokens), TierAnyOrder, true)
 	eq(t, tier, TierAnyOrder)
 	eq(t, len(hits), 2)
 }
 
 func TestMatchFieldAlignedAfterArticle(t *testing.T) {
-	tier, hits := matchField(testField(t, "The Dark Knight"), newQuery("dar kni", DefaultMaxTokens), TierAnyOrder, true)
+	tier, hits := matchField(testField(t, "The Dark Knight"), newQuery("dar kni", defaultMaxTokens), TierAnyOrder, true)
 	eq(t, tier, TierAligned)
 	eq(t, hits, []hit{{4, 3}, {9, 3}})
 
@@ -68,9 +68,9 @@ func TestMatchFieldMultiWordArticle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := Normalize("Die da Oben")
+	n := normalize("Die da Oben")
 	f := field{norm: n, skip: ix.articleSkip(n)}
-	tier, hits := matchField(f, newQuery("ob", DefaultMaxTokens), TierAnyOrder, true)
+	tier, hits := matchField(f, newQuery("ob", defaultMaxTokens), TierAnyOrder, true)
 	eq(t, tier, TierPrefix)
 	eq(t, hits, []hit{{7, 2}})
 }
@@ -82,7 +82,7 @@ func TestFilterRejectsOnlyNonMatches(t *testing.T) {
 		f := testField(t, title)
 		ff := newFieldFilter(f.norm)
 		for _, q := range queries {
-			qr := newQuery(Normalize(q), DefaultMaxTokens)
+			qr := newQuery(normalize(q), defaultMaxTokens)
 			if tier, _ := matchField(f, qr, TierAnyOrder, false); tier > 0 && !qr.filter.matches(ff) {
 				t.Errorf("filter rejects %q for %q, which matches at tier %d", title, q, tier)
 			}

@@ -99,17 +99,17 @@ func TestSearchLimit(t *testing.T) {
 	for i := range 20 {
 		many = append(many, movie{ID: fmt.Sprintf("%07d", i+1), Title: fmt.Sprintf("Film %d", i), Votes: i})
 	}
-	eq(t, len(testIndex(t, many).Search("film")), DefaultLimit)
+	eq(t, len(testIndex(t, many).Search("film")), defaultLimit)
 	res := testIndex(t, many, WithLimit(3)).Search("film")
 	eq(t, ids(res), []string{"0000020", "0000019", "0000018"})
 }
 
 func TestSearchTrimsLongQuery(t *testing.T) {
-	long := strings.Repeat("a", DefaultMaxQueryRunes)
+	long := strings.Repeat("a", defaultMaxQueryRunes)
 	ix := testIndex(t, []movie{{ID: "1", Title: long + "b"}}, WithMaxFieldBytes(200))
 
 	eq(t, ids(ix.Search(long+"c")), []string{"1"})
-	eq(t, ids(ix.Search(strings.Repeat("ă", DefaultMaxQueryRunes+1))), []string{"1"}, "runes, not bytes")
+	eq(t, ids(ix.Search(strings.Repeat("ă", defaultMaxQueryRunes+1))), []string{"1"}, "runes, not bytes")
 	eq(t, ids(ix.Search("  "+long+"  ")), []string{"1"})
 }
 
@@ -251,7 +251,7 @@ func TestSearchMatchesBruteForce(t *testing.T) {
 	queries := []string{"st", "da", "dark night", "night dark", "the night", "pădu inim", "ka ri", "star", "an",
 		"love war", "ri", "zzqx", "mo la", "night dark star road"}
 	for _, q := range queries {
-		qr := newQuery(Normalize(q), DefaultMaxTokens)
+		qr := newQuery(normalize(q), defaultMaxTokens)
 		var all []scored
 		for ci, c := range ix.snap.Load().chunks {
 			for j := range c.entries {

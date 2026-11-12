@@ -6,18 +6,16 @@ import (
 	"math"
 )
 
-// Option defaults and bounds.
 const (
-	DefaultLimit         = 8
-	DefaultMaxQueryRunes = 60
-	DefaultMinQueryLen   = 2
-	DefaultMaxTokens     = 6
-	DefaultMaxFieldBytes = 255
-	MaxFieldBytesLimit   = 65535
+	defaultLimit         = 8
+	defaultMaxQueryRunes = 60
+	defaultMinQueryLen   = 2
+	defaultMaxTokens     = 6
+	defaultMaxFieldBytes = 255
+	maxFieldBytesLimit   = 65535
 )
 
-// DefaultArticles are the leading articles skipped when matching a field from its start.
-var DefaultArticles = []string{"the", "a", "an"}
+var defaultArticles = []string{"the", "a", "an"}
 
 // ErrInvalidOption is wrapped by the errors New returns for an out of range or mistyped option.
 var ErrInvalidOption = errors.New("autocomplete: invalid option")
@@ -41,12 +39,12 @@ type settings struct {
 
 func defaultSettings() settings {
 	return settings{
-		limit:         DefaultLimit,
-		maxQueryRunes: DefaultMaxQueryRunes,
-		minQueryLen:   DefaultMinQueryLen,
-		maxTokens:     DefaultMaxTokens,
-		maxFieldBytes: DefaultMaxFieldBytes,
-		articles:      DefaultArticles,
+		limit:         defaultLimit,
+		maxQueryRunes: defaultMaxQueryRunes,
+		minQueryLen:   defaultMinQueryLen,
+		maxTokens:     defaultMaxTokens,
+		maxFieldBytes: defaultMaxFieldBytes,
+		articles:      defaultArticles,
 	}
 }
 
@@ -128,8 +126,8 @@ func WithCapacity(n int) Option {
 // a longer field is not searchable. It bounds the memory of an item no matter what its fields hold.
 func WithMaxFieldBytes(n int) Option {
 	return func(s *settings) {
-		if n < 1 || n > MaxFieldBytesLimit {
-			s.fail("max field bytes %d, want 1..%d", n, MaxFieldBytesLimit)
+		if n < 1 || n > maxFieldBytesLimit {
+			s.fail("max field bytes %d, want 1..%d", n, maxFieldBytesLimit)
 			return
 		}
 		s.maxFieldBytes = n
@@ -141,7 +139,7 @@ func WithMaxFieldBytes(n int) Option {
 func WithArticles(articles ...string) Option {
 	return func(s *settings) {
 		for _, a := range articles {
-			if n := Normalize(a); n == "" || len(n) > 254 {
+			if n := normalize(a); n == "" || len(n) > 254 {
 				s.fail("article %q", a)
 				return
 			}

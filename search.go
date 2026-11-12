@@ -35,7 +35,7 @@ func (ix *Index[T]) Search(q string) []Result[T] {
 	if s.n == 0 {
 		return nil
 	}
-	nq := Normalize(ix.trimQuery(q))
+	nq := normalize(ix.trimQuery(q))
 	if len(nq) < ix.cfg.minQueryLen {
 		return nil
 	}

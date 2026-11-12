@@ -17,7 +17,7 @@ func TestOptionBounds(t *testing.T) {
 		"max items too big":   WithMaxItems(math.MaxInt32 + 1),
 		"capacity -1":         WithCapacity(-1),
 		"max field bytes 0":   WithMaxFieldBytes(0),
-		"max field bytes big": WithMaxFieldBytes(MaxFieldBytesLimit + 1),
+		"max field bytes big": WithMaxFieldBytes(maxFieldBytesLimit + 1),
 		"article symbols":     WithArticles("--"),
 		"nil id":              WithID[movie](nil),
 		"nil score":           WithScore[movie](nil),
@@ -30,7 +30,7 @@ func TestOptionBounds(t *testing.T) {
 
 	good := []Option{
 		WithLimit(1), WithMaxQueryRunes(1), WithMinQueryLen(1), WithMaxTokens(64), WithMaxItems(0),
-		WithCapacity(0), WithMaxFieldBytes(MaxFieldBytesLimit), WithArticles(), WithArticles("Thé"),
+		WithCapacity(0), WithMaxFieldBytes(maxFieldBytesLimit), WithArticles(), WithArticles("Thé"),
 	}
 	if _, err := New[movie](good...); err != nil {
 		t.Errorf("valid options: %v", err)

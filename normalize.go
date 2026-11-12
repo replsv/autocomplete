@@ -11,9 +11,9 @@ var foldedLetters = map[rune]string{
 	'ß': "ss", 'æ': "ae", 'ø': "o", 'đ': "d", 'ł': "l", 'œ': "oe", 'ı': "i", 'þ': "th",
 }
 
-// Normalize returns lowercase ASCII words separated by single spaces ("Țara Șoimilor" -> "tara soimilor").
+// normalize returns lowercase ASCII words separated by single spaces ("Țara Șoimilor" -> "tara soimilor").
 // Letters are matched without diacritics; anything that is not a letter or a digit separates words.
-func Normalize(s string) string {
+func normalize(s string) string {
 	return string(appendNormalized(nil, s, 0, nil))
 }
 

@@ -119,21 +119,12 @@ func New[T any](opts ...Option) (*Index[T], error) {
 		ix.score = f
 	}
 	for _, a := range cfg.articles {
-		ix.articles = append(ix.articles, Normalize(a)+" ")
+		ix.articles = append(ix.articles, normalize(a)+" ")
 	}
 
 	ix.byID = make(map[string]int, cfg.capacity)
 	ix.snap.Store(&snapshot[T]{})
 	return ix, nil
-}
-
-// Fields returns the names of the tagged fields, in struct order.
-func (ix *Index[T]) Fields() []string {
-	names := make([]string, len(ix.fields))
-	for i, f := range ix.fields {
-		names[i] = f.name
-	}
-	return names
 }
 
 // structOf returns the struct behind item, or the zero Value for a nil pointer item.

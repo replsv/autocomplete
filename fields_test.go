@@ -107,7 +107,7 @@ func TestNewTagBoostAndOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eq(t, ix.Fields(), []string{"Name", "Title"})
+	eq(t, []string{ix.fields[0].name, ix.fields[1].name}, []string{"Name", "Title"})
 	eq(t, ix.fields[0].boost, 0.0)
 	eq(t, ix.fields[1].boost, 10.0)
 
