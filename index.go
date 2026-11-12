@@ -7,6 +7,7 @@ package autocomplete
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -158,11 +159,32 @@ func (ix *Index[T]) newField(text string) field {
 
 type snapshot[T any] struct {
 	entries []entry[T]
+	fields  []field       // len(fields) per entry
+	filters []fieldFilter // parallel to fields
 }
 
 type entry[T any] struct {
 	item T
 	id   string
+	base float64 // item score, the same for every field
+}
+
+// add indexes item at the end of s.
+func (ix *Index[T]) add(s *snapshot[T], item T, id string) {
+	e := entry[T]{item: item, id: id}
+	if ix.score != nil {
+		e.base = ix.score(item)
+		if math.IsNaN(e.base) {
+			e.base = 0
+		}
+	}
+	s.entries = append(s.entries, e)
+	base := ix.base(&item)
+	for k := range ix.fields {
+		f := ix.newField(ix.fields[k].get(base))
+		s.fields = append(s.fields, f)
+		s.filters = append(s.filters, newFieldFilter(f.norm))
+	}
 }
 
 // Len returns the number of indexed items.
