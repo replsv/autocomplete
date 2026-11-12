@@ -29,7 +29,8 @@ const (
 
 // Range is a half-open range of rune offsets in the original field text.
 type Range struct {
-	Start, End int
+	Start int `json:"start"`
+	End   int `json:"end"`
 }
 
 // FieldMatch holds the matched ranges of one tagged field, merged and sorted.
