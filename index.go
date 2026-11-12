@@ -68,7 +68,8 @@ type field struct {
 // it in as a whole.
 type Index[T any] struct {
 	snap atomic.Pointer[snapshot[T]]
-	mu   sync.Mutex // serializes writers
+	mu   sync.Mutex     // serializes writers
+	byID map[string]int // position of every id in the current snapshot, owned by the writers
 
 	fields   []fieldSpec
 	idField  *fieldSpec
@@ -117,6 +118,7 @@ func New[T any](opts ...Option) (*Index[T], error) {
 		ix.articles = append(ix.articles, Normalize(a)+" ")
 	}
 
+	ix.byID = map[string]int{}
 	ix.snap.Store(&snapshot[T]{})
 	return ix, nil
 }
@@ -169,8 +171,8 @@ type entry[T any] struct {
 	base float64 // item score, the same for every field
 }
 
-// add indexes item at the end of s.
-func (ix *Index[T]) add(s *snapshot[T], item T, id string) {
+// put indexes item at position pos of s, which is either taken or len(s.entries).
+func (ix *Index[T]) put(s *snapshot[T], pos int, item T, id string) {
 	e := entry[T]{item: item, id: id}
 	if ix.score != nil {
 		e.base = ix.score(item)
@@ -178,12 +180,18 @@ func (ix *Index[T]) add(s *snapshot[T], item T, id string) {
 			e.base = 0
 		}
 	}
-	s.entries = append(s.entries, e)
-	base := ix.base(&item)
+	nf := len(ix.fields)
+	if pos == len(s.entries) {
+		s.entries = append(s.entries, entry[T]{})
+		s.fields = append(s.fields, make([]field, nf)...)
+		s.filters = append(s.filters, make([]fieldFilter, nf)...)
+	}
+	s.entries[pos] = e
+	base := ix.base(&s.entries[pos].item)
 	for k := range ix.fields {
 		f := ix.newField(ix.fields[k].get(base))
-		s.fields = append(s.fields, f)
-		s.filters = append(s.filters, newFieldFilter(f.norm))
+		s.fields[pos*nf+k] = f
+		s.filters[pos*nf+k] = newFieldFilter(f.norm)
 	}
 }
 
