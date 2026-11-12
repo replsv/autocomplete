@@ -220,3 +220,26 @@ func TestFuncValues(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpsertPanicLeavesIndexConsistent(t *testing.T) {
+	ix, err := New[movie](WithScore(func(m movie) float64 {
+		if m.ID == "boom" {
+			panic("score")
+		}
+		return 0
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Build([]movie{{ID: "1", Title: "One"}}); err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() { _ = recover() }()
+		_ = ix.Upsert(movie{ID: "2", Title: "Two"}, movie{ID: "boom", Title: "Boom"})
+	}()
+	if err := ix.Upsert(movie{ID: "3", Title: "Three"}); err != nil {
+		t.Fatal(err)
+	}
+	checkIndex(t, ix, map[string]movie{"1": {ID: "1", Title: "One"}, "3": {ID: "3", Title: "Three"}})
+}

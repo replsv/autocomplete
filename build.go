@@ -72,14 +72,15 @@ func (ix *Index[T]) Upsert(items ...T) error {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 
-	ids := make([]string, len(items))
+	// user funcs run before the id map is touched, so a panic in one leaves the index consistent
+	ents := make([]entry[T], len(items))
 	var added map[string]struct{}
 	for i := range items {
 		id := ix.id(&items[i])
 		if id == "" {
 			return ErrEmptyID
 		}
-		ids[i] = id
+		ents[i] = ix.newEntry(items[i], id)
 		if _, ok := ix.byID[id]; !ok && ix.cfg.maxItems > 0 {
 			if added == nil {
 				added = map[string]struct{}{}
@@ -93,8 +94,8 @@ func (ix *Index[T]) Upsert(items ...T) error {
 	}
 
 	e := ix.edit(cur, ix.byID)
-	for i, item := range items {
-		e.put(ix.newEntry(item, ids[i]))
+	for _, ent := range ents {
+		e.put(ent)
 	}
 	ix.snap.Store(e.snapshot())
 	return nil
