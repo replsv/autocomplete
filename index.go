@@ -1,8 +1,3 @@
-// Package autocomplete is an in-memory search-as-you-type index over the string fields of your own struct type.
-//
-// Fields tagged searchindex:"true" are matched word by word, by prefix, without diacritics and case. Results are
-// ranked by match tier (exact, prefix, aligned, in order, any order), then by a per-field boost plus an optional
-// per-item score. Searches are lock-free and run concurrently with Build, Upsert and Remove.
 package autocomplete
 
 import (
