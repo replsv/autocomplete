@@ -60,7 +60,7 @@ func parseLayout(t reflect.Type) (layout, error) {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
-		return l, fmt.Errorf("autocomplete: item type %v is not a struct or a pointer to one", t)
+		return l, fmt.Errorf("%w: %v is not a struct or a pointer to one", ErrNoFields, t)
 	}
 
 	for _, sf := range reflect.VisibleFields(t) {

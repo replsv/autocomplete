@@ -2,6 +2,7 @@ package autocomplete
 
 import (
 	"errors"
+	"fmt"
 	"iter"
 	"slices"
 )
@@ -42,14 +43,16 @@ func (ix *Index[T]) BuildSeq(items iter.Seq[T]) error {
 		drafts: map[int]*draft[T]{},
 		byID:   make(map[string]int, ix.cfg.capacity),
 	}
+	i := 0
 	for item := range items {
 		id := ix.id(&item)
 		if id == "" {
-			return ErrEmptyID
+			return fmt.Errorf("%w: item %d", ErrEmptyID, i)
 		}
 		if _, ok := e.byID[id]; !ok && ix.full(e.n, 1) {
-			return ErrTooManyItems
+			return ix.errTooMany()
 		}
+		i++
 		if pos := e.put(ix.newEntry(item, id)); pos%chunkSize == chunkSize-1 {
 			e.seal(pos / chunkSize)
 		}
@@ -61,6 +64,10 @@ func (ix *Index[T]) BuildSeq(items iter.Seq[T]) error {
 
 func (ix *Index[T]) full(n, more int) bool {
 	return ix.cfg.maxItems > 0 && n+more > ix.cfg.maxItems
+}
+
+func (ix *Index[T]) errTooMany() error {
+	return fmt.Errorf("%w: limit %d", ErrTooManyItems, ix.cfg.maxItems)
 }
 
 // Upsert inserts items, or replaces the indexed items with the same id. A call copies the chunks of 256 entries
@@ -78,7 +85,7 @@ func (ix *Index[T]) Upsert(items ...T) error {
 	for i := range items {
 		id := ix.id(&items[i])
 		if id == "" {
-			return ErrEmptyID
+			return fmt.Errorf("%w: item %d", ErrEmptyID, i)
 		}
 		ents[i] = ix.newEntry(items[i], id)
 		if _, ok := ix.byID[id]; !ok && ix.cfg.maxItems > 0 {
@@ -90,7 +97,7 @@ func (ix *Index[T]) Upsert(items ...T) error {
 	}
 	cur := ix.snap.Load()
 	if ix.full(cur.n, len(added)) {
-		return ErrTooManyItems
+		return ix.errTooMany()
 	}
 
 	e := ix.edit(cur, ix.byID)
@@ -103,6 +110,9 @@ func (ix *Index[T]) Upsert(items ...T) error {
 
 // Remove removes the items with the given ids and returns how many were indexed.
 func (ix *Index[T]) Remove(ids ...string) int {
+	if len(ids) == 0 {
+		return 0
+	}
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 

@@ -94,12 +94,10 @@ func TestNewTags(t *testing.T) {
 		check(name, err, ErrInvalidTag)
 	}
 
-	if _, err := New[int](); err == nil {
-		t.Error("New[int]: no error")
-	}
-	if _, err := New[*int](); err == nil {
-		t.Error("New[*int]: no error")
-	}
+	_, err = New[int]()
+	check("int", err, ErrNoFields)
+	_, err = New[*int]()
+	check("*int", err, ErrNoFields)
 }
 
 func TestNewTagBoostAndOrder(t *testing.T) {
