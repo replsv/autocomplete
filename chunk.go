@@ -129,6 +129,7 @@ type editor[T any] struct {
 	drafts map[int]*draft[T]
 	byID   map[string]int
 	n      int
+	spare  *draft[T] // a sealed draft whose spans and text the next new chunk reuses
 }
 
 func (ix *Index[T]) edit(s *snapshot[T], byID map[string]int) *editor[T] {
@@ -142,6 +143,10 @@ func (e *editor[T]) draft(ci int) *draft[T] {
 	var d *draft[T]
 	if ci == len(e.chunks) {
 		d = &draft[T]{entries: make([]entry[T], 0, chunkSize)}
+		if e.spare != nil {
+			d.spans, d.text = e.spare.spans[:0], e.spare.text[:0]
+			e.spare = nil
+		}
 		e.chunks = append(e.chunks, nil)
 	} else {
 		d = thaw(e.chunks[ci])
@@ -190,6 +195,7 @@ func (e *editor[T]) seal(ci int) {
 	if d, ok := e.drafts[ci]; ok {
 		e.chunks[ci] = e.ix.freeze(d)
 		delete(e.drafts, ci)
+		e.spare = d
 	}
 }
 
