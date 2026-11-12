@@ -57,8 +57,10 @@ func (ix *Index[T]) BuildSeq(items iter.Seq[T]) error {
 			e.seal(pos / chunkSize)
 		}
 	}
+	s := e.snapshot(ix.snap.Load())
+	ix.reindex(s)
 	ix.byID = e.byID
-	ix.snap.Store(e.snapshot())
+	ix.snap.Store(s)
 	return nil
 }
 
@@ -104,7 +106,7 @@ func (ix *Index[T]) Upsert(items ...T) error {
 	for _, ent := range ents {
 		e.put(ent)
 	}
-	ix.snap.Store(e.snapshot())
+	ix.store(e.snapshot(cur))
 	return nil
 }
 
@@ -116,7 +118,8 @@ func (ix *Index[T]) Remove(ids ...string) int {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 
-	e := ix.edit(ix.snap.Load(), ix.byID)
+	cur := ix.snap.Load()
+	e := ix.edit(cur, ix.byID)
 	removed := 0
 	for _, id := range ids {
 		if e.remove(id) {
@@ -124,7 +127,12 @@ func (ix *Index[T]) Remove(ids ...string) int {
 		}
 	}
 	if removed > 0 {
-		ix.snap.Store(e.snapshot())
+		ix.store(e.snapshot(cur))
 	}
 	return removed
+}
+
+func (ix *Index[T]) store(s *snapshot[T]) {
+	ix.reindexIfStale(s)
+	ix.snap.Store(s)
 }

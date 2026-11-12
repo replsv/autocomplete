@@ -2,6 +2,7 @@ package autocomplete
 
 import (
 	"fmt"
+	"hash/maphash"
 	"math"
 	"reflect"
 	"strings"
@@ -72,6 +73,7 @@ type Index[T any] struct {
 	ptr      bool
 	articles []string // normalized, each followed by a space
 	maxBoost float64
+	seed     maphash.Seed
 	cfg      settings
 }
 
@@ -117,7 +119,8 @@ func New[T any](opts ...Option) (*Index[T], error) {
 	}
 
 	ix.byID = make(map[string]int, cfg.capacity)
-	ix.snap.Store(&snapshot[T]{})
+	ix.seed = maphash.MakeSeed()
+	ix.snap.Store(&snapshot[T]{words: &wordIndex{}})
 	return ix, nil
 }
 

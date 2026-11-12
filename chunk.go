@@ -9,9 +9,24 @@ import (
 // it bounds the cost of a small update; every chunk but the last is full.
 const chunkSize = 256
 
+// A snapshot gets a new word index when the positions written since the last one, which searches scan, exceed
+// max(minMerge, n/mergeRatio).
+const (
+	minMerge   = 1024
+	mergeRatio = 16
+)
+
 type snapshot[T any] struct {
 	chunks []*chunk[T]
 	n      int
+
+	words *wordIndex // over the positions below words.n as they were when it was built
+	dirty []uint64   // positions below words.n written since, nil when none
+	moved []uint32   // the positions set in dirty, in no order
+}
+
+func (s *snapshot[T]) isDirty(pos int) bool {
+	return s.dirty != nil && s.dirty[pos/64]&(1<<(pos%64)) != 0
 }
 
 // chunk is an immutable block of entries, shared by every snapshot that did not change it.
@@ -123,16 +138,20 @@ func (ix *Index[T]) truncate(d *draft[T], n int) {
 
 // editor applies writes to a copy of a snapshot, copying each touched chunk once.
 type editor[T any] struct {
-	ix     *Index[T]
-	chunks []*chunk[T]
-	drafts map[int]*draft[T]
-	byID   map[string]int
-	n      int
-	spare  *draft[T] // a sealed draft whose spans and text the next new chunk reuses
+	ix      *Index[T]
+	chunks  []*chunk[T]
+	drafts  map[int]*draft[T]
+	byID    map[string]int
+	n       int
+	spare   *draft[T] // a sealed draft whose spans and text the next new chunk reuses
+	written []int     // positions below indexed written, maybe twice
+	indexed int
 }
 
 func (ix *Index[T]) edit(s *snapshot[T], byID map[string]int) *editor[T] {
-	return &editor[T]{ix: ix, chunks: slices.Clone(s.chunks), drafts: map[int]*draft[T]{}, byID: byID, n: s.n}
+	return &editor[T]{
+		ix: ix, chunks: slices.Clone(s.chunks), drafts: map[int]*draft[T]{}, byID: byID, n: s.n, indexed: s.words.n,
+	}
 }
 
 func (e *editor[T]) draft(ci int) *draft[T] {
@@ -162,6 +181,7 @@ func (e *editor[T]) put(ent entry[T]) int {
 		e.n++
 	}
 	e.ix.set(e.draft(pos/chunkSize), pos%chunkSize, ent)
+	e.wrote(pos)
 	return pos
 }
 
@@ -178,6 +198,7 @@ func (e *editor[T]) remove(id string) bool {
 		d := e.draft(pos / chunkSize)
 		e.ix.move(d, pos%chunkSize, ld, last%chunkSize)
 		e.byID[d.entries[pos%chunkSize].id] = pos
+		e.wrote(pos)
 	}
 	e.ix.truncate(ld, last%chunkSize)
 	if last%chunkSize == 0 {
@@ -188,6 +209,12 @@ func (e *editor[T]) remove(id string) bool {
 	return true
 }
 
+func (e *editor[T]) wrote(pos int) {
+	if pos < e.indexed {
+		e.written = append(e.written, pos)
+	}
+}
+
 func (e *editor[T]) seal(ci int) {
 	if d, ok := e.drafts[ci]; ok {
 		e.chunks[ci] = e.ix.freeze(d)
@@ -196,9 +223,39 @@ func (e *editor[T]) seal(ci int) {
 	}
 }
 
-func (e *editor[T]) snapshot() *snapshot[T] {
+// snapshot seals the drafts. The new snapshot shares the word index of prev and marks the positions written as
+// dirty.
+func (e *editor[T]) snapshot(prev *snapshot[T]) *snapshot[T] {
 	for ci := range e.drafts {
 		e.seal(ci)
 	}
-	return &snapshot[T]{chunks: e.chunks, n: e.n}
+	s := &snapshot[T]{chunks: e.chunks, n: e.n, words: prev.words, dirty: prev.dirty, moved: prev.moved}
+	cloned := false
+	for _, pos := range e.written {
+		if s.isDirty(pos) {
+			continue
+		}
+		if !cloned {
+			s.dirty = make([]uint64, (s.words.n+63)/64)
+			copy(s.dirty, prev.dirty)
+			cloned = true
+		}
+		s.dirty[pos/64] |= 1 << (pos % 64)
+		// prev.moved is never appended to again, so s can grow it in place
+		s.moved = append(s.moved, uint32(pos))
+	}
+	return s
+}
+
+// reindexIfStale gives s a new word index when the positions searches have to scan are too many.
+func (ix *Index[T]) reindexIfStale(s *snapshot[T]) {
+	if pending := len(s.moved) + max(0, s.n-s.words.n); pending > max(minMerge, s.n/mergeRatio) {
+		ix.reindex(s)
+	}
+}
+
+// reindex replaces the word index of s with one over all of its positions.
+func (ix *Index[T]) reindex(s *snapshot[T]) {
+	s.words = ix.newWordIndex(s)
+	s.dirty, s.moved = nil, nil
 }

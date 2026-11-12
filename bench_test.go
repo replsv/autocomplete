@@ -203,3 +203,53 @@ func BenchmarkUpsert(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkReindex is the merge of the written positions into a new word index, which Upsert and Remove run
+// once they exceed max(minMerge, n/mergeRatio).
+func BenchmarkReindex(b *testing.B) {
+	for _, n := range benchSizes {
+		ix := benchIndex(b, benchMovies(n))
+		b.Run(sizeName(n), func(b *testing.B) {
+			b.ReportAllocs()
+			s := *ix.snap.Load()
+			for b.Loop() {
+				ix.reindex(&s)
+			}
+		})
+	}
+}
+
+// BenchmarkSearchDirty searches with 500 upserts pending, scanned linearly next to the word index.
+func BenchmarkSearchDirty(b *testing.B) {
+	const n, pending = 60_000, 500
+	movies := benchMovies(n)
+	ix := benchIndex(b, movies)
+	for i := range pending {
+		m := movies[(i*7919)%n]
+		m.Votes++
+		if err := ix.Upsert(m); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if s := ix.snap.Load(); len(s.moved) != pending {
+		b.Fatalf("%d dirty positions, want %d", len(s.moved), pending)
+	}
+	for _, q := range []struct{ name, q string }{{"prefix", "st"}, {"multiword", "dark night"}, {"nomatch", "zzqx"}} {
+		b.Run(sizeName(n)+"/"+q.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				ix.Search(q.q)
+			}
+		})
+	}
+}
+
+// BenchmarkGC is a forced collection with a 200k index live: the cost of the pointers the index holds.
+func BenchmarkGC(b *testing.B) {
+	const n = 200_000
+	ix := benchIndex(b, benchMovies(n))
+	for b.Loop() {
+		runtime.GC()
+	}
+	runtime.KeepAlive(ix)
+}

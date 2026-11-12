@@ -39,44 +39,159 @@ func (ix *Index[T]) Search(q string) []Result[T] {
 	if len(nq) < ix.cfg.minQueryLen {
 		return nil
 	}
-	qr := newQuery(nq, ix.cfg.maxTokens)
-	nf := len(ix.fields)
+	sr := searcher[T]{ix: ix, s: s, q: newQuery(nq, ix.cfg.maxTokens), top: make([]scored, 0, ix.cfg.limit)}
+	for _, pos := range s.moved {
+		if int(pos) < s.n {
+			sr.try(int(pos))
+		}
+	}
+	for pos := s.words.n; pos < s.n; pos++ {
+		sr.try(pos)
+	}
+	sr.searchWords()
 
-	tf := qr.filter
-	top := make([]scored, 0, ix.cfg.limit)
-	for ci, c := range s.chunks {
-		fs := c.filters
-		for k := 0; k < len(fs); k++ {
-			if fs[k].first&tf.first != tf.first || fs[k].pair&tf.pair != tf.pair {
-				continue
-			}
-			j := k / nf
-			k = j*nf + nf - 1
-			e := &c.entries[j]
-			minTier := TierAnyOrder
-			if len(top) == cap(top) {
-				// only a better tier can beat the last result when even the best field score cannot
-				worst := &top[len(top)-1]
-				if minTier = worst.tier; e.base+ix.maxBoost < worst.score {
-					minTier++
-				}
-				if minTier > TierExact {
-					continue
-				}
-			}
-			tier, sc := ix.scoreEntry(c, j, qr, minTier)
-			if tier == 0 {
-				continue
-			}
-			top = insertTop(top, scored{pos: ci*chunkSize + j, tier: tier, score: sc, base: e.base, id: e.id})
+	results := make([]Result[T], len(sr.top))
+	for i, sc := range sr.top {
+		results[i] = ix.result(s.chunks[sc.pos/chunkSize], sc.pos%chunkSize, sr.q, sc)
+	}
+	return results
+}
+
+type searcher[T any] struct {
+	ix  *Index[T]
+	s   *snapshot[T]
+	q   *query
+	top []scored
+}
+
+func (sr *searcher[T]) try(pos int) {
+	c, j := sr.s.chunks[pos/chunkSize], pos%chunkSize
+	e := &c.entries[j]
+	minTier := TierAnyOrder
+	if len(sr.top) == cap(sr.top) {
+		// only a better tier can beat the last result when even the best field score cannot
+		worst := &sr.top[len(sr.top)-1]
+		if minTier = worst.tier; e.base+sr.ix.maxBoost < worst.score {
+			minTier++
+		}
+		if minTier > TierExact {
+			return
+		}
+	}
+	tier, sc := sr.ix.scoreEntry(c, j, sr.q, minTier)
+	if tier == 0 {
+		return
+	}
+	sr.top = insertTop(sr.top, scored{pos: pos, tier: tier, score: sc, base: e.base, id: e.id})
+}
+
+// searchWords tries the clean positions of the word index. Every query token has to prefix a word of a
+// matching entry, and a field matches at TierAligned or better only when the first token prefixes its first
+// word, or the first after its article. So it tries the fields equal to the query, then the entries led by the
+// first token, then the entries holding the rarest token, each in descending item score, and stops a walk once
+// the entries left can only beat the results by a tier that was fully tried.
+func (sr *searcher[T]) searchWords() {
+	wi := sr.s.words
+	if wi.n == 0 {
+		return
+	}
+	toks := sr.q.toks
+	ranges := make([][2]int, len(toks))
+	rarest, second := 0, -1
+	for i, t := range toks {
+		lo, hi := wi.prefixRange(t)
+		if lo == hi {
+			return
+		}
+		ranges[i] = [2]int{lo, hi}
+		switch c := wi.any.count(lo, hi); {
+		case i == 0:
+		case c < wi.any.count(ranges[rarest][0], ranges[rarest][1]):
+			rarest, second = i, rarest
+		case second < 0 || c < wi.any.count(ranges[second][0], ranges[second][1]):
+			second = i
+		}
+	}
+	for _, h := range wi.wholeRanks(sr.q.nq) {
+		if pos := int(wi.order[uint32(h)]); pos < sr.s.n && !sr.s.isDirty(pos) {
+			sr.try(pos)
 		}
 	}
 
-	results := make([]Result[T], len(top))
-	for i, sc := range top {
-		results[i] = ix.result(s.chunks[sc.pos/chunkSize], sc.pos%chunkSize, qr, sc)
+	// candidates also have to hold a second token, checked in a bitset before the fields
+	var sets [2]*[]uint64
+	defer func() {
+		for _, set := range sets {
+			if set != nil {
+				bitsetPool.Put(set)
+			}
+		}
+	}()
+	filter := func(tok int) []uint64 {
+		if tok < 0 {
+			return nil
+		}
+		k := 0
+		if tok == second {
+			k = 1
+		}
+		if sets[k] == nil {
+			sets[k] = wi.union(&wi.any, ranges[tok][0], ranges[tok][1])
+		}
+		return *sets[k]
 	}
-	return results
+	leadFilter := rarest
+	if rarest == 0 {
+		leadFilter = second
+	}
+	if sr.walk(&wi.lead, ranges[0][0], ranges[0][1], TierExact, filter, leadFilter) {
+		sr.walk(&wi.any, ranges[rarest][0], ranges[rarest][1], TierAligned, filter, second)
+	}
+}
+
+// walk tries the clean entries of words [lo, hi) of p in rank order that are also in the filter set of token
+// tok, every entry matching at covered or better having been tried already. It reports whether it went through
+// them all.
+func (sr *searcher[T]) walk(p *postings, lo, hi int, covered Tier, filter func(int) []uint64, tok int) bool {
+	if sr.full() && sr.worst().tier >= covered {
+		return false
+	}
+	wi := sr.s.words
+	cur := wi.open(p, lo, hi)
+	defer cur.close()
+	var set []uint64
+	for r, ok := cur.next(); ok; r, ok = cur.next() {
+		if set != nil && set[r/64]&(1<<(r%64)) == 0 {
+			continue
+		}
+		pos := int(wi.order[r])
+		if pos >= sr.s.n || sr.s.isDirty(pos) {
+			continue
+		}
+		if sr.full() {
+			worst := sr.worst()
+			base := sr.s.chunks[pos/chunkSize].entries[pos%chunkSize].base
+			if base+sr.ix.maxBoost < worst.score && worst.tier+1 >= covered {
+				return false
+			}
+		}
+		if set == nil && tok >= 0 {
+			// built once the walk gets past the cheap early stops
+			if set = filter(tok); set[r/64]&(1<<(r%64)) == 0 {
+				continue
+			}
+		}
+		sr.try(pos)
+	}
+	return true
+}
+
+func (sr *searcher[T]) full() bool {
+	return len(sr.top) == cap(sr.top)
+}
+
+func (sr *searcher[T]) worst() *scored {
+	return &sr.top[len(sr.top)-1]
 }
 
 func (ix *Index[T]) trimQuery(q string) string {
@@ -95,6 +210,11 @@ func insertTop(top []scored, c scored) []scored {
 	n := len(top)
 	if n == cap(top) && !c.betterThan(&top[n-1]) {
 		return top
+	}
+	for i := range top {
+		if top[i].pos == c.pos {
+			return top
+		}
 	}
 	pos := n
 	if n < cap(top) {
