@@ -130,7 +130,7 @@ Ties within a tier and score are broken on the item score, then the id. See [exa
 | --- | --- | --- |
 | `Build(items []T) error` | `BuildFunc[T]` | replaces the whole index; for duplicate ids the last item wins |
 | `BuildSeq(items iter.Seq[T]) error` | | the same, streaming from the source without holding all items twice |
-| `Upsert(items ...T) error` | `UpdateFunc[T]` | inserts, or replaces the items with the same id |
+| `Upsert(items ...T) error` | `UpsertFunc[T]` | inserts, or replaces the items with the same id |
 | `Remove(ids ...string) int` | `RemoveFunc` | removes by id, returns how many were indexed |
 
 Method values are plain funcs, so the index never has to be shared with the code that feeds it:
@@ -138,7 +138,7 @@ Method values are plain funcs, so the index never has to be shared with the code
 ```go
 var (
 	build  autocomplete.BuildFunc[Product]  = ix.Build
-	update autocomplete.UpdateFunc[Product] = ix.Upsert
+	update autocomplete.UpsertFunc[Product] = ix.Upsert
 	remove autocomplete.RemoveFunc          = ix.Remove
 )
 
@@ -236,7 +236,7 @@ score cannot beat the last one is only checked for a better tier, which keeps po
 - [examples/basic](examples/basic): tags, build, search and printed highlights.
 - [examples/movies](examples/movies): a votes and recency ranking over movie titles.
 - [examples/httpapi](examples/httpapi): a JSON search endpoint, periodic rebuild through `BuildFunc`, upsert and
-  remove routes through `UpdateFunc` and `RemoveFunc`.
+  remove routes through `UpsertFunc` and `RemoveFunc`.
 
 ```sh
 go run ./examples/basic

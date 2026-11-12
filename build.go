@@ -17,9 +17,9 @@ var (
 // be handed to a scheduler or a handler as a plain func.
 type BuildFunc[T any] func(items []T) error
 
-// UpdateFunc inserts items, or replaces the indexed items with the same id. The method value of
+// UpsertFunc inserts items, or replaces the indexed items with the same id. The method value of
 // (*Index[T]).Upsert is one.
-type UpdateFunc[T any] func(items ...T) error
+type UpsertFunc[T any] func(items ...T) error
 
 // RemoveFunc removes items by id and returns how many were indexed. The method value of (*Index[T]).Remove is
 // one.

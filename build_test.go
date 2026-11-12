@@ -204,7 +204,7 @@ func TestFuncValues(t *testing.T) {
 	ix := testIndex(t, nil)
 	var (
 		build  BuildFunc[movie]  = ix.Build
-		update UpdateFunc[movie] = ix.Upsert
+		update UpsertFunc[movie] = ix.Upsert
 		remove RemoveFunc        = ix.Remove
 	)
 	if err := build([]movie{{ID: "1", Title: "Built"}}); err != nil {

@@ -121,7 +121,7 @@ func searchHandler(search func(string) []autocomplete.Result[Product]) http.Hand
 	})
 }
 
-func upsertHandler(update autocomplete.UpdateFunc[Product]) http.Handler {
+func upsertHandler(update autocomplete.UpsertFunc[Product]) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var items []Product
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&items); err != nil {
