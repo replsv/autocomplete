@@ -77,6 +77,7 @@ type Index[T any] struct {
 	score    func(T) float64
 	ptr      bool
 	articles []string // normalized, each followed by a space
+	maxBoost float64
 	cfg      settings
 }
 
@@ -96,7 +97,10 @@ func New[T any](opts ...Option) (*Index[T], error) {
 	if err != nil {
 		return nil, err
 	}
-	ix := &Index[T]{fields: l.fields, idField: l.id, ptr: l.ptr, cfg: cfg}
+	ix := &Index[T]{fields: l.fields, idField: l.id, ptr: l.ptr, cfg: cfg, maxBoost: l.fields[0].boost}
+	for _, f := range l.fields {
+		ix.maxBoost = max(ix.maxBoost, f.boost)
+	}
 
 	if cfg.id != nil {
 		f, ok := cfg.id.(func(T) string)

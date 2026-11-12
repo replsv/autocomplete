@@ -51,11 +51,22 @@ func (ix *Index[T]) Search(q string) []Result[T] {
 			}
 			j := k / nf
 			k = j*nf + nf - 1
-			tier, sc := ix.scoreEntry(c, j, qr)
+			e := &c.entries[j]
+			minTier := TierAnyOrder
+			if len(top) == cap(top) {
+				// only a better tier can beat the last result when even the best field score cannot
+				worst := &top[len(top)-1]
+				if minTier = worst.tier; e.base+ix.maxBoost < worst.score {
+					minTier++
+				}
+				if minTier > TierExact {
+					continue
+				}
+			}
+			tier, sc := ix.scoreEntry(c, j, qr, minTier)
 			if tier == 0 {
 				continue
 			}
-			e := &c.entries[j]
 			top = insertTop(top, scored{pos: ci*chunkSize + j, tier: tier, score: sc, base: e.base, id: e.id})
 		}
 	}
@@ -100,9 +111,9 @@ func insertTop(top []scored, c scored) []scored {
 	return top
 }
 
-// scoreEntry returns the tier and score of the best matching field of entry j (tier 0: no match). The tier
-// dominates, then the field boost plus the item score, minus a penalty for extra words.
-func (ix *Index[T]) scoreEntry(c *chunk[T], j int, q *query) (Tier, float64) {
+// scoreEntry returns the tier and score of the best field of entry j that matches at minTier or better (tier 0:
+// none). The tier dominates, then the field boost plus the item score, minus a penalty for extra words.
+func (ix *Index[T]) scoreEntry(c *chunk[T], j int, q *query, minTier Tier) (Tier, float64) {
 	var bestTier Tier
 	var best float64
 	nf := len(ix.fields)
@@ -111,7 +122,7 @@ func (ix *Index[T]) scoreEntry(c *chunk[T], j int, q *query) (Tier, float64) {
 			continue
 		}
 		f := c.field(j*nf + k)
-		tier, _ := matchField(f, q, false)
+		tier, _ := matchField(f, q, max(minTier, bestTier), false)
 		if tier == 0 {
 			continue
 		}
@@ -143,7 +154,7 @@ func (ix *Index[T]) highlight(f field, text string, q *query) []Range {
 	if text == "" {
 		return nil
 	}
-	tier, hits := matchField(f, q, true)
+	tier, hits := matchField(f, q, TierAnyOrder, true)
 	if tier == 0 {
 		return nil
 	}

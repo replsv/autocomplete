@@ -42,24 +42,26 @@ func wordCount(norm string) int {
 	return strings.Count(norm, " ") + 1
 }
 
-// matchField returns the best tier at which f matches q (0: no match), plus the matched ranges when collect is
-// set.
-func matchField(f field, q *query, collect bool) (Tier, []hit) {
-	if f.norm == "" || !anyWordHasPrefix(f.norm, q.toks[0]) {
+// matchField returns the best tier at which f matches q, or 0 when it matches below minTier, plus the matched
+// ranges when collect is set.
+func matchField(f field, q *query, minTier Tier, collect bool) (Tier, []hit) {
+	if f.norm == "" {
 		return 0, nil
 	}
-
 	for _, from := range [2]int{0, f.skip} {
 		rest := f.norm[from:]
 		if rest == q.nq {
 			return TierExact, wholeHit(collect, from, len(q.nq))
 		}
-		if strings.HasPrefix(rest, q.nq) {
+		if minTier <= TierPrefix && strings.HasPrefix(rest, q.nq) {
 			return TierPrefix, wholeHit(collect, from, len(q.nq))
 		}
 		if f.skip == 0 {
 			break
 		}
+	}
+	if minTier > TierAligned || !anyWordHasPrefix(f.norm, q.toks[0]) {
+		return 0, nil
 	}
 
 	// token i prefixes word i, from the first word or from the word after a leading article
@@ -71,6 +73,9 @@ func matchField(f field, q *query, collect bool) (Tier, []hit) {
 		if f.skip == 0 {
 			break
 		}
+	}
+	if minTier > TierInOrder {
+		return 0, nil
 	}
 
 	// tokens in increasing word order (greedy)
@@ -96,6 +101,9 @@ func matchField(f field, q *query, collect bool) (Tier, []hit) {
 	}
 	if ok {
 		return TierInOrder, hits
+	}
+	if minTier > TierAnyOrder {
+		return 0, nil
 	}
 
 	// any order, each word used once; longest tokens first so the greedy assignment is the optimal one
