@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
 // Tier is how well a field matches a query; higher is better.
@@ -137,19 +136,23 @@ func (ix *Index[T]) Fields() []string {
 	return names
 }
 
-// base is the address of the struct behind an item, nil for a nil pointer item.
-func (ix *Index[T]) base(item *T) unsafe.Pointer {
+// structOf returns the struct behind item, or the zero Value for a nil pointer item.
+func (ix *Index[T]) structOf(item *T) reflect.Value {
+	v := reflect.ValueOf(item).Elem()
 	if ix.ptr {
-		return *(*unsafe.Pointer)(unsafe.Pointer(item))
+		if v.IsNil() {
+			return reflect.Value{}
+		}
+		v = v.Elem()
 	}
-	return unsafe.Pointer(item)
+	return v
 }
 
 func (ix *Index[T]) id(item *T) string {
 	if ix.idFunc != nil {
 		return ix.idFunc(*item)
 	}
-	return ix.idField.get(ix.base(item))
+	return ix.idField.get(ix.structOf(item))
 }
 
 // articleSkip is the byte offset after the leading article of norm, 0 when there is none.

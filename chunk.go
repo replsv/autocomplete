@@ -96,10 +96,10 @@ func (ix *Index[T]) set(d *draft[T], slot int, e entry[T]) {
 		d.spans = append(d.spans, make([]dspan, nf)...)
 	}
 	d.entries[slot] = e
-	base := ix.base(&d.entries[slot].item)
+	v := ix.structOf(&d.entries[slot].item)
 	for k := range ix.fields {
 		off := len(d.text)
-		d.text = appendNormalized(d.text, ix.fields[k].get(base), ix.cfg.maxFieldBytes, nil)
+		d.text = appendNormalized(d.text, ix.fields[k].get(v), ix.cfg.maxFieldBytes, nil)
 		d.spans[slot*nf+k] = dspan{off, len(d.text) - off}
 	}
 }

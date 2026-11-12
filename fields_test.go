@@ -90,7 +90,6 @@ func TestNewTags(t *testing.T) {
 		ID    string `searchindex:"id,boost=1"`
 		Title string `searchindex:"true"`
 	}]()
-	_, tagErrors["embedded pointer"] = New[withEmbeddedPtr]()
 	for name, err := range tagErrors {
 		check(name, err, ErrInvalidTag)
 	}
@@ -118,6 +117,18 @@ func TestNewTagBoostAndOrder(t *testing.T) {
 	res := ix.Search("promoted")
 	eq(t, ids(res), []string{"1"})
 	eq(t, res[0].Ranges("Name"), []Range{{0, 8}})
+}
+
+func TestEmbeddedPointer(t *testing.T) {
+	ix, err := New[withEmbeddedPtr]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Build([]withEmbeddedPtr{{ID: "1", Inner: &Inner{Name: "Through Pointer"}}, {ID: "2"}}); err != nil {
+		t.Fatal(err)
+	}
+	eq(t, ix.Len(), 2)
+	eq(t, ids(ix.Search("through")), []string{"1"})
 }
 
 type title string

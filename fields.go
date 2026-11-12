@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"unsafe"
 )
 
 const tagName = "searchindex"
@@ -21,28 +20,30 @@ var (
 	ErrInvalidTag = errors.New("autocomplete: invalid searchindex tag")
 )
 
-// fieldSpec reads one tagged field of an item by its offset in the struct, so indexing never goes through reflect.
 type fieldSpec struct {
 	name  string
-	off   uintptr
+	index []int
 	ptr   bool // *string
 	boost float64
 }
 
-// get returns the field of the struct at base; a nil base or a nil *string reads as "".
-func (f *fieldSpec) get(base unsafe.Pointer) string {
-	if base == nil {
+// get reads the field from the struct v. An invalid v (a nil item), a nil embedded struct pointer or a nil
+// *string reads as "".
+func (f *fieldSpec) get(v reflect.Value) string {
+	if !v.IsValid() {
 		return ""
 	}
-	p := unsafe.Add(base, f.off)
+	fv, err := v.FieldByIndexErr(f.index)
+	if err != nil {
+		return ""
+	}
 	if f.ptr {
-		sp := *(**string)(p)
-		if sp == nil {
+		if fv.IsNil() {
 			return ""
 		}
-		return *sp
+		fv = fv.Elem()
 	}
-	return *(*string)(p)
+	return fv.String()
 }
 
 // layout is the result of reading the searchindex tags of an item type once, at construction.
@@ -71,11 +72,6 @@ func parseLayout(t reflect.Type) (layout, error) {
 		if role == "-" || role == "false" {
 			continue
 		}
-		off, err := fieldOffset(t, sf.Index)
-		if err != nil {
-			return l, fmt.Errorf("%w: field %s: %v", ErrInvalidTag, sf.Name, err)
-		}
-
 		switch role {
 		case "id":
 			switch {
@@ -86,9 +82,9 @@ func parseLayout(t reflect.Type) (layout, error) {
 			case l.id != nil:
 				return l, fmt.Errorf("%w: field %s: id already tagged on %s", ErrInvalidTag, sf.Name, l.id.name)
 			}
-			l.id = &fieldSpec{name: sf.Name, off: off}
+			l.id = &fieldSpec{name: sf.Name, index: sf.Index}
 		case "true":
-			spec := fieldSpec{name: sf.Name, off: off}
+			spec := fieldSpec{name: sf.Name, index: sf.Index}
 			switch {
 			case sf.Type.Kind() == reflect.String:
 			case sf.Type.Kind() == reflect.Pointer && sf.Type.Elem().Kind() == reflect.String:
@@ -129,21 +125,4 @@ func (f *fieldSpec) parseOptions(opts string) error {
 		}
 	}
 	return nil
-}
-
-// fieldOffset is the offset of a (possibly promoted) field; promotion through an embedded pointer has none.
-func fieldOffset(t reflect.Type, index []int) (uintptr, error) {
-	var off uintptr
-	for i, x := range index {
-		sf := t.Field(x)
-		off += sf.Offset
-		if i == len(index)-1 {
-			break
-		}
-		if sf.Type.Kind() != reflect.Struct {
-			return 0, fmt.Errorf("promoted through embedded %v, only embedded structs are supported", sf.Type)
-		}
-		t = sf.Type
-	}
-	return off, nil
 }

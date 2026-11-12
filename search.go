@@ -140,10 +140,10 @@ func (ix *Index[T]) scoreEntry(c *chunk[T], j int, q *query, minTier Tier) (Tier
 func (ix *Index[T]) result(c *chunk[T], j int, q *query, sc scored) Result[T] {
 	e := &c.entries[j]
 	r := Result[T]{Item: e.item, ID: e.id, Tier: sc.tier, Score: sc.score}
-	base := ix.base(&e.item)
+	v := ix.structOf(&e.item)
 	nf := len(ix.fields)
 	for k := range ix.fields {
-		if ranges := ix.highlight(c.field(j*nf+k), ix.fields[k].get(base), q); ranges != nil {
+		if ranges := ix.highlight(c.field(j*nf+k), ix.fields[k].get(v), q); ranges != nil {
 			r.Matches = append(r.Matches, FieldMatch{Field: ix.fields[k].name, Ranges: ranges})
 		}
 	}
