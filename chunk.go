@@ -104,7 +104,6 @@ func (ix *Index[T]) set(d *draft[T], slot int, e entry[T]) {
 	}
 }
 
-// move copies entry slot of src to slot dst of d.
 func (ix *Index[T]) move(d *draft[T], dst int, src *draft[T], slot int) {
 	nf := len(ix.fields)
 	d.entries[dst] = src.entries[slot]
@@ -155,7 +154,6 @@ func (e *editor[T]) draft(ci int) *draft[T] {
 	return d
 }
 
-// put inserts or replaces the entry with id e.id and returns its position.
 func (e *editor[T]) put(ent entry[T]) int {
 	pos, ok := e.byID[ent.id]
 	if !ok {
@@ -190,7 +188,6 @@ func (e *editor[T]) remove(id string) bool {
 	return true
 }
 
-// seal freezes the draft of chunk ci, if any.
 func (e *editor[T]) seal(ci int) {
 	if d, ok := e.drafts[ci]; ok {
 		e.chunks[ci] = e.ix.freeze(d)

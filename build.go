@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	// ErrEmptyID is returned when an item has an empty id.
+	// ErrEmptyID is wrapped by the error of a write that holds an item with an empty id.
 	ErrEmptyID = errors.New("autocomplete: empty item id")
-	// ErrTooManyItems is returned when a write would grow the index past WithMaxItems.
+	// ErrTooManyItems is wrapped by the error of a write that would grow the index past WithMaxItems.
 	ErrTooManyItems = errors.New("autocomplete: too many items")
 )
 

@@ -12,7 +12,8 @@ import (
 const tagName = "searchindex"
 
 var (
-	// ErrNoFields is returned by New when the item type has no field tagged searchindex:"true".
+	// ErrNoFields is returned by New when the item type has no field tagged searchindex:"true", or is not a
+	// struct or a pointer to one.
 	ErrNoFields = errors.New("autocomplete: no field tagged searchindex:\"true\"")
 	// ErrNoID is returned by New when neither a searchindex:"id" field nor WithID gives the item id.
 	ErrNoID = errors.New("autocomplete: no id: tag a string field searchindex:\"id\" or use WithID")
@@ -46,7 +47,6 @@ func (f *fieldSpec) get(v reflect.Value) string {
 	return fv.String()
 }
 
-// layout is the result of reading the searchindex tags of an item type once, at construction.
 type layout struct {
 	fields []fieldSpec
 	id     *fieldSpec

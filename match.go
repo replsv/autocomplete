@@ -6,10 +6,9 @@ import (
 	"strings"
 )
 
-// query is a normalized search query.
 type query struct {
 	nq     string
-	toks   []string // space-separated words of nq, at most MaxTokens
+	toks   []string // space-separated words of nq, at most maxTokens
 	byLen  []string // toks, longest first
 	filter tokenFilter
 }

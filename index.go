@@ -58,7 +58,6 @@ func (r *Result[T]) Ranges(field string) []Range {
 	return nil
 }
 
-// field is a normalized field value.
 type field struct {
 	norm string
 	skip int // byte offset after a leading article

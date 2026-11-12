@@ -28,7 +28,7 @@ func (a *scored) betterThan(b *scored) bool {
 	return a.id < b.id
 }
 
-// Search returns up to Limit items matching q, best first. Ties are broken by item score, then by id, so the
+// Search returns up to WithLimit items matching q, best first. Ties are broken by item score, then by id, so the
 // order is deterministic.
 func (ix *Index[T]) Search(q string) []Result[T] {
 	s := ix.snap.Load()
@@ -79,7 +79,6 @@ func (ix *Index[T]) Search(q string) []Result[T] {
 	return results
 }
 
-// trimQuery drops surrounding space and everything after MaxQueryRunes runes.
 func (ix *Index[T]) trimQuery(q string) string {
 	q = strings.TrimSpace(q)
 	n := 0
@@ -92,7 +91,6 @@ func (ix *Index[T]) trimQuery(q string) string {
 	return q
 }
 
-// insertTop inserts c into top, sorted best first, keeping at most cap(top) entries.
 func insertTop(top []scored, c scored) []scored {
 	n := len(top)
 	if n == cap(top) && !c.betterThan(&top[n-1]) {
@@ -136,7 +134,6 @@ func (ix *Index[T]) scoreEntry(c *chunk[T], j int, q *query, minTier Tier) (Tier
 	return bestTier, best
 }
 
-// result builds the result row of entry j, with the highlight ranges of every matching field.
 func (ix *Index[T]) result(c *chunk[T], j int, q *query, sc scored) Result[T] {
 	e := &c.entries[j]
 	r := Result[T]{Item: e.item, ID: e.id, Tier: sc.tier, Score: sc.score}
