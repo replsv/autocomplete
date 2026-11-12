@@ -2,7 +2,7 @@ package autocomplete
 
 import (
 	"slices"
-	"unsafe"
+	"strings"
 )
 
 // chunkSize is the number of entries per chunk. An update copies the chunks it touches plus the chunk list, so
@@ -68,18 +68,18 @@ func (ix *Index[T]) freeze(d *draft[T]) *chunk[T] {
 	for _, sp := range d.spans {
 		total += sp.n
 	}
-	buf := make([]byte, 0, total)
+	var b strings.Builder
+	b.Grow(total)
 	c := &chunk[T]{
 		filters: make([]fieldFilter, len(d.spans)),
 		spans:   make([]span, len(d.spans)),
 		entries: d.entries,
 	}
 	for i, sp := range d.spans {
-		c.spans[i] = span{off: uint32(len(buf)), n: uint16(sp.n)}
-		buf = append(buf, d.text[sp.off:sp.off+sp.n]...)
+		c.spans[i] = span{off: uint32(b.Len()), n: uint16(sp.n)}
+		b.Write(d.text[sp.off : sp.off+sp.n])
 	}
-	// buf is never written again, so the string can share it
-	c.text = unsafe.String(unsafe.SliceData(buf), len(buf))
+	c.text = b.String()
 	for i := range c.spans {
 		f := c.field(i)
 		c.spans[i].skip = uint8(ix.articleSkip(f.norm))
