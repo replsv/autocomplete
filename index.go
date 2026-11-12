@@ -118,7 +118,7 @@ func New[T any](opts ...Option) (*Index[T], error) {
 		ix.articles = append(ix.articles, Normalize(a)+" ")
 	}
 
-	ix.byID = map[string]int{}
+	ix.byID = make(map[string]int, cfg.capacity)
 	ix.snap.Store(&snapshot[T]{})
 	return ix, nil
 }
@@ -147,32 +147,17 @@ func (ix *Index[T]) id(item *T) string {
 	return ix.idField.get(ix.base(item))
 }
 
-// newField normalizes text and finds its leading article.
-func (ix *Index[T]) newField(text string) field {
-	f := field{norm: Normalize(text)}
+// articleSkip is the byte offset after the leading article of norm, 0 when there is none.
+func (ix *Index[T]) articleSkip(norm string) int {
 	for _, a := range ix.articles {
-		if strings.HasPrefix(f.norm, a) && len(f.norm) > len(a) {
-			f.skip = len(a)
-			break
+		if strings.HasPrefix(norm, a) && len(norm) > len(a) {
+			return len(a)
 		}
 	}
-	return f
+	return 0
 }
 
-type snapshot[T any] struct {
-	entries []entry[T]
-	fields  []field       // len(fields) per entry
-	filters []fieldFilter // parallel to fields
-}
-
-type entry[T any] struct {
-	item T
-	id   string
-	base float64 // item score, the same for every field
-}
-
-// put indexes item at position pos of s, which is either taken or len(s.entries).
-func (ix *Index[T]) put(s *snapshot[T], pos int, item T, id string) {
+func (ix *Index[T]) newEntry(item T, id string) entry[T] {
 	e := entry[T]{item: item, id: id}
 	if ix.score != nil {
 		e.base = ix.score(item)
@@ -180,22 +165,10 @@ func (ix *Index[T]) put(s *snapshot[T], pos int, item T, id string) {
 			e.base = 0
 		}
 	}
-	nf := len(ix.fields)
-	if pos == len(s.entries) {
-		s.entries = append(s.entries, entry[T]{})
-		s.fields = append(s.fields, make([]field, nf)...)
-		s.filters = append(s.filters, make([]fieldFilter, nf)...)
-	}
-	s.entries[pos] = e
-	base := ix.base(&s.entries[pos].item)
-	for k := range ix.fields {
-		f := ix.newField(ix.fields[k].get(base))
-		s.fields[pos*nf+k] = f
-		s.filters[pos*nf+k] = newFieldFilter(f.norm)
-	}
+	return e
 }
 
 // Len returns the number of indexed items.
 func (ix *Index[T]) Len() int {
-	return len(ix.snap.Load().entries)
+	return ix.snap.Load().n
 }

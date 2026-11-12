@@ -6,8 +6,12 @@ import (
 	"slices"
 )
 
-// ErrEmptyID is returned when an item has an empty id.
-var ErrEmptyID = errors.New("autocomplete: empty item id")
+var (
+	// ErrEmptyID is returned when an item has an empty id.
+	ErrEmptyID = errors.New("autocomplete: empty item id")
+	// ErrTooManyItems is returned when a write would grow the index past WithMaxItems.
+	ErrTooManyItems = errors.New("autocomplete: too many items")
+)
 
 // BuildFunc replaces the whole index with items. The method value of (*Index[T]).Build is one, so a rebuild can
 // be handed to a scheduler or a handler as a plain func.
@@ -32,27 +36,35 @@ func (ix *Index[T]) BuildSeq(items iter.Seq[T]) error {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 
-	s := &snapshot[T]{}
-	byID := map[string]int{}
+	e := &editor[T]{
+		ix:     ix,
+		chunks: make([]*chunk[T], 0, (ix.cfg.capacity+chunkSize-1)/chunkSize),
+		drafts: map[int]*draft[T]{},
+		byID:   make(map[string]int, ix.cfg.capacity),
+	}
 	for item := range items {
 		id := ix.id(&item)
 		if id == "" {
 			return ErrEmptyID
 		}
-		pos, ok := byID[id]
-		if !ok {
-			pos = len(s.entries)
-			byID[id] = pos
+		if _, ok := e.byID[id]; !ok && ix.full(e.n, 1) {
+			return ErrTooManyItems
 		}
-		ix.put(s, pos, item, id)
+		if pos := e.put(ix.newEntry(item, id)); pos%chunkSize == chunkSize-1 {
+			e.seal(pos / chunkSize)
+		}
 	}
-	ix.byID = byID
-	ix.snap.Store(s)
+	ix.byID = e.byID
+	ix.snap.Store(e.snapshot())
 	return nil
 }
 
-// Upsert inserts items, or replaces the indexed items with the same id. A call copies the snapshot once,
-// however many items it carries, so batch updates when you can. On error nothing is changed.
+func (ix *Index[T]) full(n, more int) bool {
+	return ix.cfg.maxItems > 0 && n+more > ix.cfg.maxItems
+}
+
+// Upsert inserts items, or replaces the indexed items with the same id. A call copies the chunks of 256 entries
+// it touches once, however many items it carries, so batch updates when you can. On error nothing is changed.
 func (ix *Index[T]) Upsert(items ...T) error {
 	if len(items) == 0 {
 		return nil
@@ -61,27 +73,30 @@ func (ix *Index[T]) Upsert(items ...T) error {
 	defer ix.mu.Unlock()
 
 	ids := make([]string, len(items))
+	var added map[string]struct{}
 	for i := range items {
-		if ids[i] = ix.id(&items[i]); ids[i] == "" {
+		id := ix.id(&items[i])
+		if id == "" {
 			return ErrEmptyID
 		}
+		ids[i] = id
+		if _, ok := ix.byID[id]; !ok && ix.cfg.maxItems > 0 {
+			if added == nil {
+				added = map[string]struct{}{}
+			}
+			added[id] = struct{}{}
+		}
+	}
+	cur := ix.snap.Load()
+	if ix.full(cur.n, len(added)) {
+		return ErrTooManyItems
 	}
 
-	cur := ix.snap.Load()
-	s := &snapshot[T]{
-		entries: slices.Clone(cur.entries),
-		fields:  slices.Clone(cur.fields),
-		filters: slices.Clone(cur.filters),
-	}
+	e := ix.edit(cur, ix.byID)
 	for i, item := range items {
-		pos, ok := ix.byID[ids[i]]
-		if !ok {
-			pos = len(s.entries)
-			ix.byID[ids[i]] = pos
-		}
-		ix.put(s, pos, item, ids[i])
+		e.put(ix.newEntry(item, ids[i]))
 	}
-	ix.snap.Store(s)
+	ix.snap.Store(e.snapshot())
 	return nil
 }
 
@@ -90,37 +105,15 @@ func (ix *Index[T]) Remove(ids ...string) int {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 
-	cur := ix.snap.Load()
-	var s *snapshot[T]
-	nf := len(ix.fields)
+	e := ix.edit(ix.snap.Load(), ix.byID)
 	removed := 0
 	for _, id := range ids {
-		pos, ok := ix.byID[id]
-		if !ok {
-			continue
+		if e.remove(id) {
+			removed++
 		}
-		if s == nil {
-			s = &snapshot[T]{
-				entries: slices.Clone(cur.entries),
-				fields:  slices.Clone(cur.fields),
-				filters: slices.Clone(cur.filters),
-			}
-		}
-		last := len(s.entries) - 1
-		if pos != last {
-			s.entries[pos] = s.entries[last]
-			copy(s.fields[pos*nf:(pos+1)*nf], s.fields[last*nf:])
-			copy(s.filters[pos*nf:(pos+1)*nf], s.filters[last*nf:])
-			ix.byID[s.entries[pos].id] = pos
-		}
-		s.entries = s.entries[:last]
-		s.fields = s.fields[:last*nf]
-		s.filters = s.filters[:last*nf]
-		delete(ix.byID, id)
-		removed++
 	}
-	if s != nil {
-		ix.snap.Store(s)
+	if removed > 0 {
+		ix.snap.Store(e.snapshot())
 	}
 	return removed
 }

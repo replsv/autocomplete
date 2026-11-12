@@ -2,7 +2,6 @@ package autocomplete
 
 import (
 	"unicode"
-	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -49,8 +48,6 @@ func appendNormalized(dst []byte, s string, limit int, src *[]int) []byte {
 		}
 	}
 
-	var rbuf [utf8.UTFMax]byte
-	var nbuf [4 * utf8.UTFMax]byte
 	idx := 0
 	for _, r := range s {
 		switch {
@@ -66,21 +63,11 @@ func appendNormalized(dst []byte, s string, limit int, src *[]int) []byte {
 		case unicode.Is(unicode.Mn, r):
 			// combining mark of a decomposed letter: neither a letter nor a separator
 		default:
-			r = unicode.ToLower(r)
-			var nfd []byte
-			if folded, ok := foldedLetters[r]; ok {
-				nfd = norm.NFD.AppendString(nbuf[:0], folded)
-			} else {
-				nfd = norm.NFD.Append(nbuf[:0], utf8.AppendRune(rbuf[:0], r)...)
+			f := folded(r)
+			for i := range len(f) {
+				emit(f[i], idx)
 			}
-			wrote := false
-			for _, c := range nfd {
-				if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
-					emit(c, idx)
-					wrote = true
-				}
-			}
-			if !wrote {
+			if f == "" {
 				pendingSpace = true
 			}
 		}
@@ -90,4 +77,43 @@ func appendNormalized(dst []byte, s string, limit int, src *[]int) []byte {
 		idx++
 	}
 	return dst
+}
+
+// Latin letters folded ahead of time, since the NFD decomposition allocates.
+var (
+	latinFold    = foldRange(0x80, 0x250)    // Latin-1 Supplement, Latin Extended-A and B
+	latinExtFold = foldRange(0x1e00, 0x1f00) // Latin Extended Additional
+)
+
+func foldRange(lo, hi rune) []string {
+	t := make([]string, hi-lo)
+	for r := lo; r < hi; r++ {
+		t[r-lo] = fold(r)
+	}
+	return t
+}
+
+// folded is the ASCII spelling of a non-ASCII rune: its lowercase letters and digits without diacritics, or "".
+func folded(r rune) string {
+	switch {
+	case r >= 0x80 && r < 0x250:
+		return latinFold[r-0x80]
+	case r >= 0x1e00 && r < 0x1f00:
+		return latinExtFold[r-0x1e00]
+	}
+	return fold(r)
+}
+
+func fold(r rune) string {
+	r = unicode.ToLower(r)
+	if f, ok := foldedLetters[r]; ok {
+		return f
+	}
+	var b []byte
+	for _, c := range []byte(norm.NFD.String(string(r))) {
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
+			b = append(b, c)
+		}
+	}
+	return string(b)
 }

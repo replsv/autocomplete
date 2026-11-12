@@ -3,14 +3,17 @@ package autocomplete
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
-// Defaults of the query options.
+// Option defaults and bounds.
 const (
 	DefaultLimit         = 8
 	DefaultMaxQueryRunes = 60
 	DefaultMinQueryLen   = 2
 	DefaultMaxTokens     = 6
+	DefaultMaxFieldBytes = 255
+	MaxFieldBytesLimit   = 65535
 )
 
 // DefaultArticles are the leading articles skipped when matching a field from its start.
@@ -27,6 +30,9 @@ type settings struct {
 	maxQueryRunes int
 	minQueryLen   int
 	maxTokens     int
+	maxItems      int
+	capacity      int
+	maxFieldBytes int
 	articles      []string
 	id            any // func(T) string
 	score         any // func(T) float64
@@ -39,6 +45,7 @@ func defaultSettings() settings {
 		maxQueryRunes: DefaultMaxQueryRunes,
 		minQueryLen:   DefaultMinQueryLen,
 		maxTokens:     DefaultMaxTokens,
+		maxFieldBytes: DefaultMaxFieldBytes,
 		articles:      DefaultArticles,
 	}
 }
@@ -91,6 +98,41 @@ func WithMaxTokens(n int) Option {
 			return
 		}
 		s.maxTokens = n
+	}
+}
+
+// WithMaxItems bounds the number of indexed items; 0, the default, means no bound. Build and Upsert return
+// ErrTooManyItems instead of growing past it, and the current index keeps serving.
+func WithMaxItems(n int) Option {
+	return func(s *settings) {
+		if n < 0 || n > math.MaxInt32 {
+			s.fail("max items %d, want 0..%d", n, math.MaxInt32)
+			return
+		}
+		s.maxItems = n
+	}
+}
+
+// WithCapacity presizes the index for about n items, so Build does not grow its id map while loading.
+func WithCapacity(n int) Option {
+	return func(s *settings) {
+		if n < 0 || n > math.MaxInt32 {
+			s.fail("capacity %d, want 0..%d", n, math.MaxInt32)
+			return
+		}
+		s.capacity = n
+	}
+}
+
+// WithMaxFieldBytes bounds the normalized length of each indexed field (default 255, at most 65535); the rest of
+// a longer field is not searchable. It bounds the memory of an item no matter what its fields hold.
+func WithMaxFieldBytes(n int) Option {
+	return func(s *settings) {
+		if n < 1 || n > MaxFieldBytesLimit {
+			s.fail("max field bytes %d, want 1..%d", n, MaxFieldBytesLimit)
+			return
+		}
+		s.maxFieldBytes = n
 	}
 }
 

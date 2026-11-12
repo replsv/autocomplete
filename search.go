@@ -31,7 +31,7 @@ func (a *scored) betterThan(b *scored) bool {
 // order is deterministic.
 func (ix *Index[T]) Search(q string) []Result[T] {
 	s := ix.snap.Load()
-	if len(s.entries) == 0 {
+	if s.n == 0 {
 		return nil
 	}
 	nq := Normalize(ix.trimQuery(q))
@@ -41,19 +41,28 @@ func (ix *Index[T]) Search(q string) []Result[T] {
 	qr := newQuery(nq, ix.cfg.maxTokens)
 	nf := len(ix.fields)
 
+	tf := qr.filter
 	top := make([]scored, 0, ix.cfg.limit)
-	for i := range s.entries {
-		e := &s.entries[i]
-		tier, sc := ix.scoreEntry(e.base, s.fields[i*nf:(i+1)*nf], s.filters[i*nf:(i+1)*nf], qr)
-		if tier == 0 {
-			continue
+	for ci, c := range s.chunks {
+		fs := c.filters
+		for k := 0; k < len(fs); k++ {
+			if fs[k].first&tf.first != tf.first || fs[k].pair&tf.pair != tf.pair {
+				continue
+			}
+			j := k / nf
+			k = j*nf + nf - 1
+			tier, sc := ix.scoreEntry(c, j, qr)
+			if tier == 0 {
+				continue
+			}
+			e := &c.entries[j]
+			top = insertTop(top, scored{pos: ci*chunkSize + j, tier: tier, score: sc, base: e.base, id: e.id})
 		}
-		top = insertTop(top, scored{pos: i, tier: tier, score: sc, base: e.base, id: e.id})
 	}
 
 	results := make([]Result[T], len(top))
-	for i, c := range top {
-		results[i] = ix.result(&s.entries[c.pos], s.fields[c.pos*nf:(c.pos+1)*nf], qr, c)
+	for i, sc := range top {
+		results[i] = ix.result(s.chunks[sc.pos/chunkSize], sc.pos%chunkSize, qr, sc)
 	}
 	return results
 }
@@ -91,21 +100,23 @@ func insertTop(top []scored, c scored) []scored {
 	return top
 }
 
-// scoreEntry returns the tier and score of the best matching field (tier 0: no match). The tier dominates, then
-// the field boost plus the item score, minus a penalty for extra words.
-func (ix *Index[T]) scoreEntry(base float64, fields []field, filters []fieldFilter, q *query) (Tier, float64) {
+// scoreEntry returns the tier and score of the best matching field of entry j (tier 0: no match). The tier
+// dominates, then the field boost plus the item score, minus a penalty for extra words.
+func (ix *Index[T]) scoreEntry(c *chunk[T], j int, q *query) (Tier, float64) {
 	var bestTier Tier
 	var best float64
-	for k := range fields {
-		if !q.filter.matches(filters[k]) {
+	nf := len(ix.fields)
+	for k := range ix.fields {
+		if !q.filter.matches(c.filters[j*nf+k]) {
 			continue
 		}
-		tier, _ := matchField(fields[k], q, false)
+		f := c.field(j*nf + k)
+		tier, _ := matchField(f, q, false)
 		if tier == 0 {
 			continue
 		}
-		penalty := float64(min(80, 8*max(0, wordCount(fields[k].norm)-len(q.toks))))
-		sc := ix.fields[k].boost + base - penalty
+		penalty := float64(min(80, 8*max(0, wordCount(f.norm)-len(q.toks))))
+		sc := ix.fields[k].boost + c.entries[j].base - penalty
 		if tier > bestTier || tier == bestTier && sc > best {
 			bestTier, best = tier, sc
 		}
@@ -113,12 +124,14 @@ func (ix *Index[T]) scoreEntry(base float64, fields []field, filters []fieldFilt
 	return bestTier, best
 }
 
-// result builds the result row, with the highlight ranges of every matching field.
-func (ix *Index[T]) result(e *entry[T], fields []field, q *query, c scored) Result[T] {
-	r := Result[T]{Item: e.item, ID: e.id, Tier: c.tier, Score: c.score}
+// result builds the result row of entry j, with the highlight ranges of every matching field.
+func (ix *Index[T]) result(c *chunk[T], j int, q *query, sc scored) Result[T] {
+	e := &c.entries[j]
+	r := Result[T]{Item: e.item, ID: e.id, Tier: sc.tier, Score: sc.score}
 	base := ix.base(&e.item)
+	nf := len(ix.fields)
 	for k := range ix.fields {
-		if ranges := ix.highlight(fields[k], ix.fields[k].get(base), q); ranges != nil {
+		if ranges := ix.highlight(c.field(j*nf+k), ix.fields[k].get(base), q); ranges != nil {
 			r.Matches = append(r.Matches, FieldMatch{Field: ix.fields[k].name, Ranges: ranges})
 		}
 	}
@@ -135,7 +148,7 @@ func (ix *Index[T]) highlight(f field, text string, q *query) []Range {
 		return nil
 	}
 	var src []int
-	norm := appendNormalized(make([]byte, 0, len(f.norm)), text, 0, &src)
+	norm := appendNormalized(make([]byte, 0, len(f.norm)), text, ix.cfg.maxFieldBytes, &src)
 	if string(norm) != f.norm {
 		// the item was changed after it was indexed
 		return nil
