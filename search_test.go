@@ -2,6 +2,7 @@ package autocomplete
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -232,4 +233,45 @@ func TestHighlightAfterItemMutated(t *testing.T) {
 	res := ix.Search("mutable")
 	eq(t, ids(res), []string{"1"}, "the index keeps what was indexed")
 	eq(t, res[0].Ranges("Alt"), []Range(nil), "no ranges for text that changed")
+}
+
+// TestSearchMatchesBruteForce checks the pruned scan against scoring every entry.
+func TestSearchMatchesBruteForce(t *testing.T) {
+	movies := benchMovies(5000)
+	ix, err := New[benchMovie](WithScore(benchScore), WithLimit(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Build(movies); err != nil {
+		t.Fatal(err)
+	}
+	queries := []string{"st", "da", "dark night", "night dark", "the night", "pădu inim", "ka ri", "star", "an",
+		"love war", "ri", "zzqx", "mo la", "night dark star road"}
+	for _, q := range queries {
+		qr := newQuery(Normalize(q), DefaultMaxTokens)
+		var all []scored
+		for ci, c := range ix.snap.Load().chunks {
+			for j := range c.entries {
+				if tier, sc := ix.scoreEntry(c, j, qr, TierAnyOrder); tier > 0 {
+					e := &c.entries[j]
+					all = append(all, scored{pos: ci*chunkSize + j, tier: tier, score: sc, base: e.base, id: e.id})
+				}
+			}
+		}
+		slices.SortFunc(all, func(a, b scored) int {
+			if a.betterThan(&b) {
+				return -1
+			}
+			return 1
+		})
+		var want []string
+		for _, c := range all[:min(len(all), 5)] {
+			want = append(want, c.id)
+		}
+		got := ids(ix.Search(q))
+		if len(want) == 0 {
+			want = []string{}
+		}
+		eq(t, got, want, q)
+	}
 }
