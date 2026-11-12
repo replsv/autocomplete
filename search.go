@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 type scored struct {
@@ -170,6 +171,7 @@ func (ix *Index[T]) highlight(f field, text string, q *query) []Range {
 		ranges = append(ranges, Range{src[h.off], src[h.off+h.n-1] + 1})
 	}
 	slices.SortFunc(ranges, func(a, b Range) int { return cmp.Compare(a.Start, b.Start) })
+	extendOverMarks(text, ranges)
 
 	merged := ranges[:0]
 	for _, r := range ranges {
@@ -180,4 +182,22 @@ func (ix *Index[T]) highlight(f field, text string, q *query) []Range {
 		merged = append(merged, r)
 	}
 	return merged
+}
+
+// extendOverMarks moves the end of each sorted range past the combining marks of its last letter, so a
+// decomposed "é" is highlighted whole.
+func extendOverMarks(text string, ranges []Range) {
+	k, i := 0, 0
+	for _, r := range text {
+		for k < len(ranges) && ranges[k].End < i {
+			k++
+		}
+		if k == len(ranges) {
+			return
+		}
+		if ranges[k].End == i && unicode.Is(unicode.Mn, r) {
+			ranges[k].End++
+		}
+		i++
+	}
 }

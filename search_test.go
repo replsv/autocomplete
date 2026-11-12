@@ -118,6 +118,7 @@ func TestSearchHighlight(t *testing.T) {
 		{ID: "0054331", Title: "O luptă după alta", Alt: ptr("One Battle After Another"), Year: 2025, Votes: 1},
 		{ID: "0000002", Title: "Straße", Year: 2000, Votes: 1},
 		{ID: "0000003", Title: "Țara Șoimilor", Alt: ptr("Țara noastră"), Year: 2000, Votes: 1},
+		{ID: "0000004", Title: "Ame\u0301lie Poulain", Alt: ptr("Cafe\u0301 Cafe\u0301"), Year: 2000, Votes: 1},
 	})
 
 	tests := []struct {
@@ -132,6 +133,8 @@ func TestSearchHighlight(t *testing.T) {
 		{"sharp s", "strass", []Range{{0, 5}}, nil},
 		{"both fields", "tara", []Range{{0, 4}}, []Range{{0, 4}}},
 		{"any order", "soim tar", []Range{{0, 3}, {5, 9}}, nil},
+		{"decomposed accent kept whole", "ame poul", []Range{{0, 4}, {8, 12}}, nil},
+		{"decomposed accent at word end", "caf cafe", nil, []Range{{0, 3}, {6, 11}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
