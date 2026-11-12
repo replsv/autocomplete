@@ -34,18 +34,18 @@ type Range struct {
 
 // FieldMatch holds the matched ranges of one tagged field, merged and sorted.
 type FieldMatch struct {
-	Field  string
-	Ranges []Range
+	Field  string  `json:"field"`
+	Ranges []Range `json:"ranges"`
 }
 
 // Result is one match: the indexed item, its id, the tier and score of its best field, and the highlight ranges
 // of every matching field.
 type Result[T any] struct {
-	Item    T
-	ID      string
-	Tier    Tier
-	Score   float64
-	Matches []FieldMatch
+	Item    T            `json:"item"`
+	ID      string       `json:"id"`
+	Tier    Tier         `json:"tier"`
+	Score   float64      `json:"score"`
+	Matches []FieldMatch `json:"matches,omitempty"`
 }
 
 // Ranges returns the matched ranges of the named field, or nil when it did not match.
