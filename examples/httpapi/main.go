@@ -18,10 +18,12 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/replsv/autocomplete"
@@ -57,11 +59,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	load := func() ([]Product, error) { return loadProducts(*data) }
-	if err := rebuild(load, ix.Build); err != nil {
+	load := func(ctx context.Context) ([]Product, error) { return loadProducts(ctx, *data) }
+	if err := rebuild(ctx, load, ix.Build); err != nil {
 		log.Fatal(err)
 	}
 	go rebuildEvery(ctx, *every, load, ix.Build)
@@ -72,20 +74,30 @@ func main() {
 	mux.Handle("DELETE /items/{id}", removeHandler(ix.Remove))
 
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		srv.Shutdown(shutdown)
-	}()
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
 	log.Printf("listening on %s with %d products", *addr, ix.Len())
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+
+	select {
+	case err := <-serveErr:
 		log.Fatal(err)
+	case <-ctx.Done():
+	}
+	stop()
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdown); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+		log.Print(err)
 	}
 }
 
-func rebuild(load func() ([]Product, error), build autocomplete.BuildFunc[Product]) error {
-	items, err := load()
+type loader func(context.Context) ([]Product, error)
+
+func rebuild(ctx context.Context, load loader, build autocomplete.BuildFunc[Product]) error {
+	items, err := load(ctx)
 	if err != nil {
 		return err
 	}
@@ -93,7 +105,7 @@ func rebuild(load func() ([]Product, error), build autocomplete.BuildFunc[Produc
 }
 
 // rebuildEvery replaces the index from load until ctx is done. A failed load keeps the current index.
-func rebuildEvery(ctx context.Context, every time.Duration, load func() ([]Product, error), build autocomplete.BuildFunc[Product]) {
+func rebuildEvery(ctx context.Context, every time.Duration, load loader, build autocomplete.BuildFunc[Product]) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -101,7 +113,7 @@ func rebuildEvery(ctx context.Context, every time.Duration, load func() ([]Produ
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := rebuild(load, build); err != nil {
+			if err := rebuild(ctx, load, build); err != nil {
 				log.Printf("rebuild: %v", err)
 			}
 		}
@@ -149,10 +161,12 @@ func removeHandler(remove autocomplete.RemoveFunc) http.Handler {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("write response: %v", err)
+	}
 }
 
-func loadProducts(path string) ([]Product, error) {
+func loadProducts(ctx context.Context, path string) ([]Product, error) {
 	if path == "" {
 		return []Product{
 			{SKU: "kb-01", Name: "Mechanical Keyboard", Brand: "Keychron", Sales: 900},
@@ -162,11 +176,17 @@ func loadProducts(path string) ([]Product, error) {
 			{SKU: "kb-02", Name: "Low Profile Keyboard", Brand: "Logitech", Sales: 400},
 		}, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	var items []Product
-	return items, json.NewDecoder(f).Decode(&items)
+	if err := json.NewDecoder(f).Decode(&items); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return items, nil
 }
