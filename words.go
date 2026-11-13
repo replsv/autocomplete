@@ -1,8 +1,8 @@
 package autocomplete
 
 import (
-	"cmp"
 	"hash/maphash"
+	"math"
 	"math/bits"
 	"slices"
 	"sort"
@@ -64,24 +64,29 @@ func (wi *wordIndex) wholeRanks(s string) []uint64 {
 func (ix *Index[T]) newWordIndex(s *snapshot[T]) *wordIndex {
 	n := s.n
 	nf := len(ix.fields)
-	wi := &wordIndex{n: n, order: make([]uint32, n), seed: ix.seed}
-	for i := range wi.order {
-		wi.order[i] = uint32(i)
-	}
-	if ix.score != nil {
-		base := make([]float64, n)
-		for i := range base {
-			base[i] = s.chunks[i/chunkSize].entries[i%chunkSize].base
+	wi := &wordIndex{n: n, seed: ix.seed}
+	words, starts := 0, 0
+	for _, c := range s.chunks {
+		for i := range c.spans {
+			if f := c.field(i); f.norm != "" {
+				words += wordCount(f.norm)
+				starts++
+				if f.skip > 0 {
+					starts++
+				}
+			}
 		}
-		slices.SortFunc(wi.order, func(a, b uint32) int { return cmp.Compare(base[b], base[a]) })
 	}
+	wi.order = rankOrder(s, ix.score != nil)
 
-	// word<<32 | rank, in rank order, each word once per entry
-	vocab := map[string]uint32{}
-	var anyOcc, leadOcc, ws, ls []uint64
+	// the words of each entry, once, in rank order; the entry of rank r ends at anyEnd[r]
+	vocab := make(map[string]uint32, len(s.words.wordOff))
+	anyOcc, leadOcc := make([]uint32, 0, words), make([]uint32, 0, starts)
+	anyEnd, leadEnd := make([]uint32, n), make([]uint32, n)
+	wi.whole = make([]uint64, 0, starts)
+	var anySeen, leadSeen []uint32 // 1 + the last rank each word id was added for
 	for r, pos := range wi.order {
 		c, j := s.chunks[pos/chunkSize], int(pos%chunkSize)
-		ws, ls = ws[:0], ls[:0]
 		for k := range nf {
 			f := c.field(j*nf + k)
 			if f.norm == "" {
@@ -99,63 +104,130 @@ func (ix *Index[T]) newWordIndex(s *snapshot[T]) *wordIndex {
 				if !ok {
 					id = uint32(len(vocab))
 					vocab[w] = id
+					anySeen, leadSeen = append(anySeen, 0), append(leadSeen, 0)
 				}
-				ws = append(ws, uint64(id)<<32|uint64(r))
-				if start == 0 || start == f.skip {
-					ls = append(ls, uint64(id)<<32|uint64(r))
+				if anySeen[id] != uint32(r)+1 {
+					anySeen[id] = uint32(r) + 1
+					anyOcc = append(anyOcc, id)
+				}
+				if (start == 0 || start == f.skip) && leadSeen[id] != uint32(r)+1 {
+					leadSeen[id] = uint32(r) + 1
+					leadOcc = append(leadOcc, id)
 				}
 			}
 		}
-		slices.Sort(ws)
-		slices.Sort(ls)
-		anyOcc = append(anyOcc, slices.Compact(ws)...)
-		leadOcc = append(leadOcc, slices.Compact(ls)...)
+		anyEnd[r], leadEnd[r] = uint32(len(anyOcc)), uint32(len(leadOcc))
 	}
-	slices.Sort(wi.whole)
+	// stable, so the ranks of a hash stay in order and duplicates next to each other
+	radixSort(wi.whole, []uint64(nil), 4)
 	wi.whole = slices.Clip(slices.Compact(wi.whole))
 
 	sorted := make([]string, len(vocab))
+	size := 0
 	for w, id := range vocab {
 		sorted[id] = w
+		size += len(w)
 	}
-	byWord := make([]uint32, len(sorted)) // word id -> place in sorted order
+	byWord := make([]uint32, len(sorted))
 	for i := range byWord {
 		byWord[i] = uint32(i)
 	}
 	slices.SortFunc(byWord, func(a, b uint32) int { return strings.Compare(sorted[a], sorted[b]) })
-	size := 0
-	for _, w := range sorted {
-		size += len(w)
-	}
 	var b strings.Builder
 	b.Grow(size)
 	wi.wordOff = make([]uint32, len(sorted)+1)
-	place := make([]uint32, len(sorted))
+	place := make([]uint32, len(sorted)) // word id -> place in sorted order
 	for i, id := range byWord {
 		place[id] = uint32(i)
 		b.WriteString(sorted[id])
 		wi.wordOff[i+1] = uint32(b.Len())
 	}
 	wi.words = b.String()
-	wi.any = newPostings(anyOcc, place)
-	wi.lead = newPostings(leadOcc, place)
+	wi.any = newPostings(anyOcc, anyEnd, place)
+	wi.lead = newPostings(leadOcc, leadEnd, place)
 	return wi
 }
 
-// newPostings groups occurrences, word id<<32 | rank in rank order, by the place of their word.
-func newPostings(occ []uint64, place []uint32) postings {
+// rankOrder returns the positions of s in descending item score.
+func rankOrder[T any](s *snapshot[T], scored bool) []uint32 {
+	order := make([]uint32, s.n)
+	for i := range order {
+		order[i] = uint32(i)
+	}
+	if !scored {
+		return order
+	}
+	keys := make([]uint64, s.n)
+	for i := range keys {
+		// flipped so that the unsigned order of the keys is the descending order of the scores
+		b := math.Float64bits(s.chunks[i/chunkSize].entries[i%chunkSize].base)
+		if b>>63 == 0 {
+			b |= 1 << 63
+		} else {
+			b = ^b
+		}
+		keys[i] = ^b
+	}
+	radixSort(keys, order, 0)
+	return order
+}
+
+// radixSort sorts keys by their bytes from byte from up, stably, and vals along with them unless vals is nil.
+func radixSort[V any](keys []uint64, vals []V, from int) {
+	tk := make([]uint64, len(keys))
+	var tv []V
+	if vals != nil {
+		tv = make([]V, len(vals))
+	}
+	src, dst, srcV, dstV := keys, tk, vals, tv
+	swapped := false
+	for shift := uint(8 * from); shift < 64; shift += 8 {
+		var count [256]int
+		for _, k := range src {
+			count[byte(k>>shift)]++
+		}
+		if len(src) < 2 || count[byte(src[0]>>shift)] == len(src) {
+			continue
+		}
+		next := 0
+		for i, c := range count {
+			count[i] = next
+			next += c
+		}
+		for i, k := range src {
+			d := &count[byte(k>>shift)]
+			dst[*d] = k
+			if vals != nil {
+				dstV[*d] = srcV[i]
+			}
+			*d++
+		}
+		src, dst, srcV, dstV = dst, src, dstV, srcV
+		swapped = !swapped
+	}
+	if swapped {
+		copy(keys, src)
+		copy(vals, srcV)
+	}
+}
+
+// newPostings groups the word ids occ, the ones of rank r ending at end[r], by the place of their word.
+func newPostings(occ, end []uint32, place []uint32) postings {
 	p := postings{ranks: make([]uint32, len(occ)), off: make([]uint32, len(place)+1)}
-	for _, o := range occ {
-		p.off[place[o>>32]+1]++
+	for _, w := range occ {
+		p.off[place[w]+1]++
 	}
 	for i := 1; i < len(p.off); i++ {
 		p.off[i] += p.off[i-1]
 	}
 	next := slices.Clone(p.off[:len(place)])
-	for _, o := range occ {
-		w := place[o>>32]
-		p.ranks[next[w]] = uint32(o)
-		next[w]++
+	i := 0
+	for r, e := range end {
+		for ; i < int(e); i++ {
+			w := place[occ[i]]
+			p.ranks[next[w]] = uint32(r)
+			next[w]++
+		}
 	}
 	return p
 }
