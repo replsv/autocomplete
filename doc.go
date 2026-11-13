@@ -29,6 +29,6 @@
 // search sees the index before or after a write, never a mix. Snapshots are made of chunks of 256 items, and a
 // write copies only the chunks it touches. A sorted word table with posting lists, ordered by item score, finds
 // the candidates of a query; the items written since it was built are scanned until there are more than
-// max(1024, n/16) of them, and then the write that crosses that line rebuilds it. [WithMaxItems] and
-// [WithMaxFieldBytes] bound what the index can hold.
+// max(1024, n/16) of them, and then the write that crosses that line starts rebuilding it in the background.
+// [WithMaxItems] and [WithMaxFieldBytes] bound what the index can hold.
 package autocomplete

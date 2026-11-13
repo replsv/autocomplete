@@ -9,8 +9,8 @@ import (
 // it bounds the cost of a small update; every chunk but the last is full.
 const chunkSize = 256
 
-// A snapshot gets a new word index when the positions written since the last one, which searches scan, exceed
-// max(minMerge, n/mergeRatio).
+// A snapshot gets a new word index, built in the background, when the positions written since the last one,
+// which searches scan, exceed max(minMerge, n/mergeRatio).
 const (
 	minMerge   = 1024
 	mergeRatio = 16
@@ -144,13 +144,13 @@ type editor[T any] struct {
 	byID    map[string]int
 	n       int
 	spare   *draft[T] // a sealed draft whose spans and text the next new chunk reuses
-	written []int     // positions below indexed written, maybe twice
-	indexed int
+	written []int     // positions written, maybe twice, when track is set
+	track   bool
 }
 
 func (ix *Index[T]) edit(s *snapshot[T], byID map[string]int) *editor[T] {
 	return &editor[T]{
-		ix: ix, chunks: slices.Clone(s.chunks), drafts: map[int]*draft[T]{}, byID: byID, n: s.n, indexed: s.words.n,
+		ix: ix, chunks: slices.Clone(s.chunks), drafts: map[int]*draft[T]{}, byID: byID, n: s.n, track: true,
 	}
 }
 
@@ -210,7 +210,7 @@ func (e *editor[T]) remove(id string) bool {
 }
 
 func (e *editor[T]) wrote(pos int) {
-	if pos < e.indexed {
+	if e.track {
 		e.written = append(e.written, pos)
 	}
 }
@@ -230,27 +230,71 @@ func (e *editor[T]) snapshot(prev *snapshot[T]) *snapshot[T] {
 		e.seal(ci)
 	}
 	s := &snapshot[T]{chunks: e.chunks, n: e.n, words: prev.words, dirty: prev.dirty, moved: prev.moved}
-	cloned := false
-	for _, pos := range e.written {
-		if s.isDirty(pos) {
-			continue
-		}
-		if !cloned {
-			s.dirty = make([]uint64, (s.words.n+63)/64)
-			copy(s.dirty, prev.dirty)
-			cloned = true
-		}
-		s.dirty[pos/64] |= 1 << (pos % 64)
-		// prev.moved is never appended to again, so s can grow it in place
-		s.moved = append(s.moved, uint32(pos))
-	}
+	s.markDirty(e.written)
 	return s
 }
 
-// reindexIfStale gives s a new word index when the positions searches have to scan are too many.
+// markDirty marks the positions below words.n, copying the bitset s may share with an older snapshot.
+func (s *snapshot[T]) markDirty(written []int) {
+	cloned := false
+	for _, pos := range written {
+		if pos >= s.words.n || s.isDirty(pos) {
+			continue
+		}
+		if !cloned {
+			dirty := make([]uint64, (s.words.n+63)/64)
+			copy(dirty, s.dirty)
+			s.dirty = dirty
+			cloned = true
+		}
+		s.dirty[pos/64] |= 1 << (pos % 64)
+		// the older snapshot's moved is never appended to again, so s can grow it in place
+		s.moved = append(s.moved, uint32(pos))
+	}
+}
+
+func (s *snapshot[T]) stale() bool {
+	pending := len(s.moved) + max(0, s.n-s.words.n)
+	return pending > max(minMerge, s.n/mergeRatio)
+}
+
+// reindexIfStale starts rebuilding the word index in the background when searches have too many positions to
+// scan. One rebuild runs at a time; the writes made meanwhile are logged so that it can re-base them.
 func (ix *Index[T]) reindexIfStale(s *snapshot[T]) {
-	if pending := len(s.moved) + max(0, s.n-s.words.n); pending > max(minMerge, s.n/mergeRatio) {
-		ix.reindex(s)
+	if ix.rebuilding || !s.stale() {
+		return
+	}
+	ix.rebuilding = true
+	ix.rebuildLog = nil
+	ix.rebuilds.Add(1)
+	go ix.rebuild(s, ix.gen)
+}
+
+// rebuild indexes s, then swaps the index into the current snapshot with the positions written since s as
+// dirty. It drops the result when a Build came in between, and goes on while the snapshot is still stale.
+func (ix *Index[T]) rebuild(s *snapshot[T], gen uint64) {
+	defer ix.rebuilds.Done()
+	for {
+		words := ix.newWordIndex(s)
+		if ix.rebuilt != nil {
+			ix.rebuilt()
+		}
+		ix.mu.Lock()
+		cur := ix.snap.Load()
+		if gen == ix.gen {
+			next := &snapshot[T]{chunks: cur.chunks, n: cur.n, words: words}
+			next.markDirty(ix.rebuildLog)
+			ix.snap.Store(next)
+			cur = next
+		}
+		ix.rebuildLog = nil
+		if !cur.stale() {
+			ix.rebuilding = false
+			ix.mu.Unlock()
+			return
+		}
+		s, gen = cur, ix.gen
+		ix.mu.Unlock()
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -148,11 +150,17 @@ func TestSearchMatchesLinearScanAfterWrites(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if ix.snap.Load().words != words {
-			reindexed++
-		}
 		for _, q := range queries {
 			checkSame(t, ix, q)
+		}
+		if step%3 == 0 {
+			ix.waitRebuild()
+			for _, q := range queries {
+				checkSame(t, ix, q)
+			}
+		}
+		if ix.snap.Load().words != words {
+			reindexed++
 		}
 		if t.Failed() {
 			t.Fatalf("step %d", step)
@@ -179,6 +187,186 @@ func TestSearchExactBeatsScore(t *testing.T) {
 	eq(t, ids(ix.Search("star ship")), []string{"article", "aligned", "deep"})
 	eq(t, ids(ix.Search("the star ship")), []string{"article"})
 	for _, q := range []string{"star", "star ship", "st sh", "ship star", "the", "big"} {
+		checkSame(t, ix, q)
+	}
+}
+
+func (ix *Index[T]) waitRebuild() {
+	ix.rebuilds.Wait()
+}
+
+// holdRebuilds makes the rebuilds of ix wait between indexing and swapping until release is called; started
+// receives once a rebuild is waiting.
+func holdRebuilds[T any](ix *Index[T]) (started <-chan struct{}, release func()) {
+	ch, gate := make(chan struct{}, 1), make(chan struct{})
+	ix.rebuilt = func() {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+		<-gate
+	}
+	return ch, sync.OnceFunc(func() { close(gate) })
+}
+
+// stale upserts items with new votes until a rebuild starts.
+func stale(t *testing.T, ix *Index[benchMovie], movies []benchMovie, r *rand.Rand, started <-chan struct{}) {
+	t.Helper()
+	for {
+		select {
+		case <-started:
+			return
+		default:
+		}
+		m := movies[r.IntN(len(movies))]
+		m.Votes = r.IntN(500000)
+		if err := ix.Upsert(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSearchMatchesLinearScanDuringRebuild(t *testing.T) {
+	movies := benchMovies(4000)
+	r := rand.New(rand.NewPCG(10, 11))
+	queries := randomQueries(r, benchTexts(movies), 80)
+	ix, err := New[benchMovie](WithScore(benchScore), WithLimit(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Build(movies[:3000]); err != nil {
+		t.Fatal(err)
+	}
+	started, release := holdRebuilds(ix)
+	defer release()
+	stale(t, ix, movies[:3000], r, started)
+	before := ix.snap.Load().words
+
+	// replaced, moved by removes, appended past the indexed positions, removed from the end
+	for step := range 30 {
+		switch step % 3 {
+		case 0:
+			var items []benchMovie
+			for range 50 {
+				m := movies[r.IntN(len(movies))]
+				m.Title = movies[r.IntN(len(movies))].Title
+				items = append(items, m)
+			}
+			if err := ix.Upsert(items...); err != nil {
+				t.Fatal(err)
+			}
+		case 1:
+			var rm []string
+			for range 30 {
+				rm = append(rm, movies[r.IntN(len(movies))].ID)
+			}
+			ix.Remove(rm...)
+		default:
+			for _, q := range queries {
+				checkSame(t, ix, q)
+			}
+		}
+	}
+	if ix.snap.Load().words != before {
+		t.Fatal("the word index changed while its rebuild was held")
+	}
+	release()
+	ix.waitRebuild()
+	if ix.snap.Load().words == before {
+		t.Fatal("the rebuild was not installed")
+	}
+	for _, q := range queries {
+		checkSame(t, ix, q)
+	}
+}
+
+func TestBuildDuringRebuild(t *testing.T) {
+	movies := benchMovies(4000)
+	r := rand.New(rand.NewPCG(12, 13))
+	ix, err := New[benchMovie](WithScore(benchScore))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Build(movies[:3000]); err != nil {
+		t.Fatal(err)
+	}
+	started, release := holdRebuilds(ix)
+	defer release()
+	stale(t, ix, movies[:3000], r, started)
+
+	if err := ix.Build(movies[1000:]); err != nil {
+		t.Fatal(err)
+	}
+	built := ix.snap.Load()
+	release()
+	ix.waitRebuild()
+	if ix.snap.Load() != built {
+		t.Fatal("a rebuild started before the Build replaced its result")
+	}
+	eq(t, ix.Len(), 3000)
+	for _, q := range randomQueries(r, benchTexts(movies), 80) {
+		checkSame(t, ix, q)
+	}
+}
+
+func TestConcurrentWritesAcrossRebuilds(t *testing.T) {
+	movies := benchMovies(3000)
+	ix, err := New[benchMovie](WithScore(benchScore))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Build(movies[:2000]); err != nil {
+		t.Fatal(err)
+	}
+	var rebuilt atomic.Int32
+	ix.rebuilt = func() { rebuilt.Add(1) }
+
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	for g := range 3 {
+		readers.Go(func() {
+			queries := []string{"st", "dark night", "night dark star", "pădu inim", "lo ri ta"}
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				for _, res := range ix.Search(queries[(g+i)%len(queries)]) {
+					if res.ID != res.Item.ID || res.Tier == 0 {
+						t.Errorf("inconsistent result %+v", res)
+						return
+					}
+				}
+			}
+		})
+	}
+	var writers sync.WaitGroup
+	for w := range 2 {
+		writers.Go(func() {
+			r := rand.New(rand.NewPCG(uint64(w), 14))
+			for i := range 3000 {
+				m := movies[r.IntN(len(movies))]
+				if i%4 == 3 {
+					ix.Remove(m.ID)
+					continue
+				}
+				m.Votes = r.IntN(500000)
+				if err := ix.Upsert(m); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+	}
+	writers.Wait()
+	close(stop)
+	readers.Wait()
+	ix.waitRebuild()
+	if rebuilt.Load() < 2 {
+		t.Errorf("%d rebuilds, want several", rebuilt.Load())
+	}
+	for _, q := range randomQueries(rand.New(rand.NewPCG(15, 16)), benchTexts(movies), 60) {
 		checkSame(t, ix, q)
 	}
 }

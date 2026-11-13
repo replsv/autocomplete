@@ -66,6 +66,13 @@ type Index[T any] struct {
 	mu   sync.Mutex     // serializes writers
 	byID map[string]int // position of every id in the current snapshot, owned by the writers
 
+	// owned by the writers too
+	gen        uint64         // Builds so far
+	rebuilding bool           // a word index rebuild is running
+	rebuildLog []int          // positions written since the snapshot it indexes
+	rebuilds   sync.WaitGroup // the running rebuild
+	rebuilt    func()         // test hook, run by a rebuild between indexing and swapping
+
 	fields   []fieldSpec
 	idField  *fieldSpec
 	idFunc   func(T) string

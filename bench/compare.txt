@@ -139,3 +139,33 @@ SearchShortTokens/n=200k/rare-4    1029063.5n ±  2%   444.4n ± 1%  -99.96% (p=
 GC-4                                   3.862m ±  2%   3.976m ± 1%   +2.95% (p=0.002 n=6)
 geomean                                578.8µ         35.68µ       -93.83%
 
+
+# Background word index rebuild: synchronous rebuild (prev_lat.txt) vs background (new2.txt), 5000 single upserts at 60k
+
+                │ prev_lat.txt │             new2.txt              │
+                │    sec/op    │   sec/op     vs base              │
+UpsertLatency-4    239.0m ± 1%   221.2m ± 1%  -7.44% (p=0.002 n=6)
+
+                │ prev_lat.txt │              new2.txt               │
+                │   max-sec    │   max-sec     vs base               │
+UpsertLatency-4   28.017m ± 4%   1.951m ± 14%  -93.04% (p=0.002 n=6)
+
+                │ prev_lat.txt │             new2.txt              │
+                │   p50-sec    │   p50-sec    vs base              │
+UpsertLatency-4    35.20µ ± 1%   36.25µ ± 1%  +2.99% (p=0.002 n=6)
+
+                │ prev_lat.txt │             new2.txt              │
+                │   p99-sec    │   p99-sec    vs base              │
+UpsertLatency-4    132.5µ ± 1%   138.0µ ± 2%  +4.12% (p=0.002 n=6)
+
+                │ prev_lat.txt │           new2.txt            │
+                │  p99.9-sec   │  p99.9-sec    vs base         │
+UpsertLatency-4   287.7µ ± 16%   318.0µ ± 14%  ~ (p=0.180 n=6)
+
+                │ prev_lat.txt │              new2.txt              │
+                │     B/op     │     B/op      vs base              │
+UpsertLatency-4   338.7Mi ± 0%   338.7Mi ± 0%  +0.02% (p=0.002 n=6)
+
+                │ prev_lat.txt │             new2.txt              │
+                │  allocs/op   │  allocs/op   vs base              │
+UpsertLatency-4    75.24k ± 0%   75.26k ± 0%  +0.02% (p=0.002 n=6)

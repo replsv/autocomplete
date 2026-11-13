@@ -198,8 +198,13 @@ does not pay for its 60k postings; a walk that goes on past 1024 candidates swit
 word index as it is. The positions they write are marked in a bitset over the indexed positions (copied on
 write, n/8 bytes) and in a list; searches skip them in the index and scan them, with their bloom filters, next
 to it, along with the items appended since. Once more than max(1024, n/16) positions are pending, the write
-that crosses the line rebuilds the word index from the normalized text (23.6 ms at 60k items, 86 ms at 200k),
-which is about 6-7 µs per written item amortized. A single upsert at 60k items allocates about 70 KiB. A batch
+that crosses the line starts rebuilding the word index from the normalized text in a goroutine, and returns.
+The rebuild (23.6 ms at 60k items, 86 ms at 200k, about 6-7 µs of CPU per written item amortized) reads the
+immutable chunks of that snapshot, then takes the writer mutex for a moment to swap the new index into the
+current snapshot, with the positions written in the meantime marked dirty again. One rebuild runs at a time:
+writes that come during it are logged, and if they already make the new snapshot stale it goes on with
+another rebuild instead of starting a goroutine. A `Build` during a rebuild wins, the rebuild's result is
+dropped. A single upsert at 60k items allocates about 70 KiB. A batch
 of 100 random ids touches up to 100 chunks (5.8 MiB at 60k); ids that are close together share chunks. A
 removal moves the last item into the hole so every chunk but the last stays full.
 
@@ -217,6 +222,10 @@ during a rebuild of the word index alone:
 | --- | --- | --- | --- | --- |
 | 60k | 7.3 MiB | 15.5 MiB | 35.1 MiB | 22.5 MiB |
 | 200k | 24.0 MiB | 46.8 MiB | 107.1 MiB | 69.1 MiB |
+
+A background rebuild holds the old and the new word index, plus its temporary slices, until the swap: the heap
+grows by 7.1 MiB over the live index at 60k items and by 22.4 MiB at 200k (sampled from the write that starts
+it until it is installed).
 
 Set `GOMEMLIMIT` to leave room for two snapshots plus the rest of the process; at 60k items, 150MiB is plenty.
 Use `WithMaxItems` and `WithMaxFieldBytes` to bound what a bad feed can do.
@@ -266,12 +275,15 @@ first) walks every candidate of its rarest token, and is only about twice as fas
 
 | Update at 60k | before | after | B/op before | B/op after |
 | --- | --- | --- | --- | --- |
-| `Upsert` one item | 41.1 µs | 50.5 µs | 59.5 KiB | 69.5 KiB |
-| `Upsert` 100 random items | 4.07 ms | 4.81 ms | 5.6 MiB | 5.8 MiB |
-| `Upsert` a new item, then `Remove` it | 25.8 µs | 26.0 µs | 52.9 KiB | 53.0 KiB |
-| word index rebuild | | 23.6 ms | | 7.2 MiB |
+| `Upsert` one item | 41.1 µs | 44.0 µs | 59.5 KiB | 69.5 KiB |
+| `Upsert` 100 random items | 4.07 ms | 4.16 ms | 5.6 MiB | 5.8 MiB |
+| `Upsert` a new item, then `Remove` it | 25.8 µs | 25.3 µs | 52.9 KiB | 53.0 KiB |
+| word index rebuild, in the background | | 23.6 ms | | 7.2 MiB |
 
-The upsert rows include the word index rebuilds they trigger, amortized. A forced GC with a 200k index live
+The upsert rows include the CPU of the word index rebuilds they trigger, running next to them. No write waits
+for one: over 5000 single upserts at 60k items (`BenchmarkUpsertLatency`), one upsert takes 36 µs at the
+median, 138 µs at p99 and at most 2.0 ms, where the synchronous rebuild made the slowest one take 28 ms
+(p50 35 µs, p99 133 µs before). A forced GC with a 200k index live
 takes 3.9-4.0 ms before and after: the index adds no pointers.
 
 ## Examples

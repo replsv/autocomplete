@@ -59,6 +59,7 @@ func (ix *Index[T]) BuildSeq(items iter.Seq[T]) error {
 	}
 	s := e.snapshot(ix.snap.Load())
 	ix.reindex(s)
+	ix.gen++
 	ix.byID = e.byID
 	ix.snap.Store(s)
 	return nil
@@ -106,7 +107,7 @@ func (ix *Index[T]) Upsert(items ...T) error {
 	for _, ent := range ents {
 		e.put(ent)
 	}
-	ix.store(e.snapshot(cur))
+	ix.store(e)
 	return nil
 }
 
@@ -127,12 +128,16 @@ func (ix *Index[T]) Remove(ids ...string) int {
 		}
 	}
 	if removed > 0 {
-		ix.store(e.snapshot(cur))
+		ix.store(e)
 	}
 	return removed
 }
 
-func (ix *Index[T]) store(s *snapshot[T]) {
-	ix.reindexIfStale(s)
+func (ix *Index[T]) store(e *editor[T]) {
+	s := e.snapshot(ix.snap.Load())
+	if ix.rebuilding {
+		ix.rebuildLog = append(ix.rebuildLog, e.written...)
+	}
 	ix.snap.Store(s)
+	ix.reindexIfStale(s)
 }

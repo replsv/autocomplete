@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type benchMovie struct {
@@ -217,6 +218,34 @@ func BenchmarkSearchShortTokens(b *testing.B) {
 			})
 		}
 	}
+}
+
+// BenchmarkUpsertLatency times 5000 single upserts at 60k items, more than a rebuild threshold of written
+// positions, and reports the distribution of one upsert.
+func BenchmarkUpsertLatency(b *testing.B) {
+	const n, ops = 60_000, 5000
+	movies := benchMovies(n)
+	ix := benchIndex(b, movies)
+	var durs []time.Duration
+	i := 0
+	for b.Loop() {
+		for range ops {
+			m := movies[(i*7919)%n]
+			m.Votes++
+			start := time.Now()
+			if err := ix.Upsert(m); err != nil {
+				b.Fatal(err)
+			}
+			durs = append(durs, time.Since(start))
+			i++
+		}
+	}
+	slices.Sort(durs)
+	at := func(q float64) float64 { return float64(durs[int(q*float64(len(durs)-1))].Nanoseconds()) }
+	b.ReportMetric(at(0.5), "p50-ns")
+	b.ReportMetric(at(0.99), "p99-ns")
+	b.ReportMetric(at(0.999), "p99.9-ns")
+	b.ReportMetric(at(1), "max-ns")
 }
 
 // BenchmarkReindex is the merge of the written positions into a new word index, which Upsert and Remove run
