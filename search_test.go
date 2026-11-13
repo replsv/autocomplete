@@ -251,7 +251,7 @@ func TestSearchMatchesBruteForce(t *testing.T) {
 	queries := []string{"st", "da", "dark night", "night dark", "the night", "pădu inim", "ka ri", "star", "an",
 		"love war", "ri", "zzqx", "mo la", "night dark star road"}
 	for _, q := range queries {
-		qr := newQuery(normalize(q), defaultMaxTokens)
+		qr := newQuery(Normalize(q), defaultMaxTokens)
 		var all []scored
 		for ci, c := range ix.snap.Load().chunks {
 			for j := range c.entries {

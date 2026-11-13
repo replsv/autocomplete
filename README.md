@@ -68,7 +68,7 @@ normalized copies; reflection is used again only to highlight the few results re
 
 Queries and fields are normalized the same way: lowercase ASCII words, diacritics removed (`ß` → `ss`, `æ` →
 `ae`, `ł` → `l`, ...), anything that is not a letter or digit separates words. Every query word must prefix a
-word of the field. The tiers, best first:
+word of the field. `Normalize` applies the same normalization to your own keys. The tiers, best first:
 
 | Tier | Example: field `The Dark Knight` |
 | --- | --- |

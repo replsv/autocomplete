@@ -107,3 +107,8 @@ func ExampleUpsertFunc() {
 	fmt.Println(ix.Len(), remove("1"), ix.Len())
 	// Output: 5 1 4
 }
+
+func ExampleNormalize() {
+	fmt.Println(autocomplete.Normalize("Țara Șoimilor"))
+	// Output: tara soimilor
+}

@@ -26,7 +26,7 @@ func TestNormalize(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eq(t, normalize(tt.in), tt.want)
+			eq(t, Normalize(tt.in), tt.want)
 		})
 	}
 }

@@ -122,7 +122,7 @@ func New[T any](opts ...Option) (*Index[T], error) {
 		ix.score = f
 	}
 	for _, a := range cfg.articles {
-		ix.articles = append(ix.articles, normalize(a)+" ")
+		ix.articles = append(ix.articles, Normalize(a)+" ")
 	}
 
 	ix.byID = make(map[string]int, cfg.capacity)

@@ -13,7 +13,7 @@ import (
 // linearSearch is Search without the word index: it scores every entry of the snapshot.
 func linearSearch[T any](ix *Index[T], q string) []Result[T] {
 	s := ix.snap.Load()
-	nq := normalize(ix.trimQuery(q))
+	nq := Normalize(ix.trimQuery(q))
 	if s.n == 0 || len(nq) < ix.cfg.minQueryLen {
 		return nil
 	}
@@ -54,7 +54,7 @@ func checkSame[T any](t *testing.T, ix *Index[T], q string) {
 func randomQueries(r *rand.Rand, texts []string, n int) []string {
 	var words []string
 	for _, t := range texts {
-		words = append(words, strings.Fields(normalize(t))...)
+		words = append(words, strings.Fields(Normalize(t))...)
 	}
 	qs := []string{"st", "s", "the", "the night", "a", "an st", "zzqx", "o lupta", "st ka", "lo ri ta", "night xq"}
 	for range n {

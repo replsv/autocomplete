@@ -8,7 +8,7 @@ func testField(t *testing.T, text string) field {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := normalize(text)
+	n := Normalize(text)
 	return field{norm: n, skip: ix.articleSkip(n)}
 }
 
@@ -68,7 +68,7 @@ func TestMatchFieldMultiWordArticle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := normalize("Die da Oben")
+	n := Normalize("Die da Oben")
 	f := field{norm: n, skip: ix.articleSkip(n)}
 	tier, hits := matchField(f, newQuery("ob", defaultMaxTokens), TierAnyOrder, true)
 	eq(t, tier, TierPrefix)
@@ -82,7 +82,7 @@ func TestFilterRejectsOnlyNonMatches(t *testing.T) {
 		f := testField(t, title)
 		ff := newFieldFilter(f.norm)
 		for _, q := range queries {
-			qr := newQuery(normalize(q), defaultMaxTokens)
+			qr := newQuery(Normalize(q), defaultMaxTokens)
 			if tier, _ := matchField(f, qr, TierAnyOrder, false); tier > 0 && !qr.filter.matches(ff) {
 				t.Errorf("filter rejects %q for %q, which matches at tier %d", title, q, tier)
 			}

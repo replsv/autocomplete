@@ -11,9 +11,10 @@ var foldedLetters = map[rune]string{
 	'ß': "ss", 'æ': "ae", 'ø': "o", 'đ': "d", 'ł': "l", 'œ': "oe", 'ı': "i", 'þ': "th",
 }
 
-// normalize returns lowercase ASCII words separated by single spaces ("Țara Șoimilor" -> "tara soimilor").
-// Letters are matched without diacritics; anything that is not a letter or a digit separates words.
-func normalize(s string) string {
+// Normalize returns s as lowercase ASCII words without diacritics, separated by single spaces
+// ("Țara Șoimilor" -> "tara soimilor"). It is the normalization the index applies to fields and queries,
+// so callers can normalize their own keys the same way.
+func Normalize(s string) string {
 	return string(appendNormalized(nil, s, 0, nil))
 }
 

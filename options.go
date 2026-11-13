@@ -139,7 +139,7 @@ func WithMaxFieldBytes(n int) Option {
 func WithArticles(articles ...string) Option {
 	return func(s *settings) {
 		for _, a := range articles {
-			if n := normalize(a); n == "" || len(n) > 254 {
+			if n := Normalize(a); n == "" || len(n) > 254 {
 				s.fail("article %q", a)
 				return
 			}
