@@ -42,11 +42,11 @@ func (ix *Index[T]) Search(q string) []Result[T] {
 	sr := searcher[T]{ix: ix, s: s, q: newQuery(nq, ix.cfg.maxTokens), top: make([]scored, 0, ix.cfg.limit)}
 	for _, pos := range s.moved {
 		if int(pos) < s.n {
-			sr.try(int(pos))
+			sr.scan(int(pos))
 		}
 	}
 	for pos := s.words.n; pos < s.n; pos++ {
-		sr.try(pos)
+		sr.scan(pos)
 	}
 	sr.searchWords()
 
@@ -62,6 +62,18 @@ type searcher[T any] struct {
 	s   *snapshot[T]
 	q   *query
 	top []scored
+}
+
+// scan tries pos once a field passes the prefilter.
+func (sr *searcher[T]) scan(pos int) {
+	nf := len(sr.ix.fields)
+	j := pos % chunkSize
+	for _, ff := range sr.s.chunks[pos/chunkSize].filters[j*nf : j*nf+nf] {
+		if sr.q.filter.matches(ff) {
+			sr.try(pos)
+			return
+		}
+	}
 }
 
 func (sr *searcher[T]) try(pos int) {
