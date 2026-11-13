@@ -165,6 +165,7 @@ func (sr *searcher[T]) walk(set wordSet, filter *wordSet, covered Tier) bool {
 	}
 	wi := sr.s.words
 	cur := wi.open(set.p, set.lo, set.hi)
+	defer cur.close()
 	var bits *[]uint64
 	defer func() {
 		if bits != nil {
