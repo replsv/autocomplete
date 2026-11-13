@@ -3,7 +3,6 @@ package autocomplete
 import (
 	"hash/maphash"
 	"math"
-	"math/bits"
 	"slices"
 	"sort"
 	"strings"
@@ -234,12 +233,18 @@ func newPostings(occ, end []uint32, place []uint32) postings {
 
 var bitsetPool = sync.Pool{New: func() any { return new([]uint64) }}
 
-// cursor walks a set of ranks in ascending order: a posting list, or a bitset when it is the union of several.
+// cursor walks the ranks of one or more posting lists in ascending order, each rank once. Several lists are
+// merged lazily through a heap of their heads, so a walk that stops early pays only for what it read.
 type cursor struct {
 	ranks []uint32
-	bits  *[]uint64
+	heap  []head
+	last  uint32
 	i     int
-	w     uint64
+}
+
+type head struct {
+	r      uint32 // ranks[i]
+	i, end uint32
 }
 
 // open returns a cursor over the ranks of words [lo, hi) of p.
@@ -247,7 +252,34 @@ func (wi *wordIndex) open(p *postings, lo, hi int) cursor {
 	if hi-lo == 1 {
 		return cursor{ranks: p.ranks[p.off[lo]:p.off[hi]]}
 	}
-	return cursor{bits: wi.union(p, lo, hi), i: -1}
+	c := cursor{ranks: p.ranks, heap: make([]head, 0, hi-lo), last: ^uint32(0)}
+	for w := lo; w < hi; w++ {
+		if p.off[w] < p.off[w+1] {
+			c.heap = append(c.heap, head{p.ranks[p.off[w]], p.off[w], p.off[w+1]})
+		}
+	}
+	for i := len(c.heap)/2 - 1; i >= 0; i-- {
+		c.down(i)
+	}
+	return c
+}
+
+func (c *cursor) down(i int) {
+	h := c.heap
+	for {
+		m := 2*i + 1
+		if m >= len(h) {
+			return
+		}
+		if m+1 < len(h) && h[m+1].r < h[m].r {
+			m++
+		}
+		if h[i].r <= h[m].r {
+			return
+		}
+		h[i], h[m] = h[m], h[i]
+		i = m
+	}
 }
 
 // union returns a pooled bitset of the ranks of words [lo, hi) of p.
@@ -267,29 +299,27 @@ func (wi *wordIndex) union(p *postings, lo, hi int) *[]uint64 {
 }
 
 func (c *cursor) next() (uint32, bool) {
-	if c.bits == nil {
-		if c.i == len(c.ranks) {
-			return 0, false
+	if c.heap != nil {
+		for len(c.heap) > 0 {
+			h := &c.heap[0]
+			r := h.r
+			if h.i++; h.i < h.end {
+				h.r = c.ranks[h.i]
+			} else {
+				c.heap[0] = c.heap[len(c.heap)-1]
+				c.heap = c.heap[:len(c.heap)-1]
+			}
+			c.down(0)
+			if r != c.last {
+				c.last = r
+				return r, true
+			}
 		}
-		c.i++
-		return c.ranks[c.i-1], true
+		return 0, false
 	}
-	set := *c.bits
-	for c.w == 0 {
-		c.i++
-		if c.i >= len(set) {
-			return 0, false
-		}
-		c.w = set[c.i]
+	if c.i == len(c.ranks) {
+		return 0, false
 	}
-	t := bits.TrailingZeros64(c.w)
-	c.w &= c.w - 1
-	return uint32(c.i*64 + t), true
-}
-
-func (c *cursor) close() {
-	if c.bits != nil {
-		bitsetPool.Put(c.bits)
-		c.bits = nil
-	}
+	c.i++
+	return c.ranks[c.i-1], true
 }

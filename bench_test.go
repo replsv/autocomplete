@@ -204,6 +204,21 @@ func BenchmarkUpsert(b *testing.B) {
 	})
 }
 
+// BenchmarkSearchShortTokens is queries of several short prefixes, each matching a large part of the index.
+func BenchmarkSearchShortTokens(b *testing.B) {
+	for _, n := range benchSizes[1:] {
+		ix := benchIndex(b, benchMovies(n))
+		for _, q := range []struct{ name, q string }{{"two", "st ka"}, {"three", "lo ri ta"}, {"rare", "night xq"}} {
+			b.Run(sizeName(n)+"/"+q.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					ix.Search(q.q)
+				}
+			})
+		}
+	}
+}
+
 // BenchmarkReindex is the merge of the written positions into a new word index, which Upsert and Remove run
 // once they exceed max(minMerge, n/mergeRatio).
 func BenchmarkReindex(b *testing.B) {

@@ -87,9 +87,10 @@ func (sr *searcher[T]) try(pos int) {
 
 // searchWords tries the clean positions of the word index. Every query token has to prefix a word of a
 // matching entry, and a field matches at TierAligned or better only when the first token prefixes its first
-// word, or the first after its article. So it tries the fields equal to the query, then the entries led by the
-// first token, then the entries holding the rarest token, each in descending item score, and stops a walk once
-// the entries left can only beat the results by a tier that was fully tried.
+// word, or the first after its article; at TierPrefix with a query of several words, only when the first token
+// is that word. So it tries the fields equal to the query, then the entries led by the first token as a word,
+// then by the first token as a prefix, then the entries holding the rarest token, each in descending item
+// score, and stops once the entries left can only beat the results by a tier that was fully tried.
 func (sr *searcher[T]) searchWords() {
 	wi := sr.s.words
 	if wi.n == 0 {
@@ -118,50 +119,60 @@ func (sr *searcher[T]) searchWords() {
 		}
 	}
 
-	// candidates also have to hold a second token, checked in a bitset before the fields
-	var sets [2]*[]uint64
-	defer func() {
-		for _, set := range sets {
-			if set != nil {
-				bitsetPool.Put(set)
+	// a candidate has to hold a second token too: the smaller set drives the walk, the other filters it
+	lead := wordSet{&wi.lead, ranges[0][0], ranges[0][1]}
+	var leadFilter, anyFilter *wordSet
+	if f := rarest; f != 0 || second >= 0 {
+		if f == 0 {
+			f = second
+		}
+		leadFilter = &wordSet{&wi.any, ranges[f][0], ranges[f][1]}
+	}
+	if second >= 0 {
+		anyFilter = &wordSet{&wi.any, ranges[second][0], ranges[second][1]}
+	}
+	covered := TierExact
+	if strings.IndexByte(sr.q.nq, ' ') > 0 {
+		// a field that starts with several words starts with the whole first token
+		if lo := ranges[0][0]; wi.word(lo) == toks[0] {
+			if !sr.walk(wordSet{&wi.lead, lo, lo + 1}, leadFilter, covered) {
+				return
 			}
 		}
-	}()
-	filter := func(tok int) []uint64 {
-		if tok < 0 {
-			return nil
-		}
-		k := 0
-		if tok == second {
-			k = 1
-		}
-		if sets[k] == nil {
-			sets[k] = wi.union(&wi.any, ranges[tok][0], ranges[tok][1])
-		}
-		return *sets[k]
+		covered = TierPrefix
 	}
-	leadFilter := rarest
-	if rarest == 0 {
-		leadFilter = second
-	}
-	if sr.walk(&wi.lead, ranges[0][0], ranges[0][1], TierExact, filter, leadFilter) {
-		sr.walk(&wi.any, ranges[rarest][0], ranges[rarest][1], TierAligned, filter, second)
+	if sr.walk(lead, leadFilter, covered) {
+		sr.walk(wordSet{&wi.any, ranges[rarest][0], ranges[rarest][1]}, anyFilter, TierAligned)
 	}
 }
 
-// walk tries the clean entries of words [lo, hi) of p in rank order that are also in the filter set of token
-// tok, every entry matching at covered or better having been tried already. It reports whether it went through
-// them all.
-func (sr *searcher[T]) walk(p *postings, lo, hi int, covered Tier, filter func(int) []uint64, tok int) bool {
+// wordSet is the entries holding one of the words [lo, hi) of p.
+type wordSet struct {
+	p      *postings
+	lo, hi int
+}
+
+// walk tries the clean entries of set that are also in filter, unless it is nil, in rank order. Every entry
+// matching at covered or better has been tried already. It reports whether it went through them all.
+func (sr *searcher[T]) walk(set wordSet, filter *wordSet, covered Tier) bool {
 	if sr.full() && sr.worst().tier >= covered {
 		return false
 	}
+	if filter != nil && filter.p.count(filter.lo, filter.hi) < set.p.count(set.lo, set.hi) {
+		drive := *filter
+		filter = &set
+		set = drive
+	}
 	wi := sr.s.words
-	cur := wi.open(p, lo, hi)
-	defer cur.close()
-	var set []uint64
+	cur := wi.open(set.p, set.lo, set.hi)
+	var bits *[]uint64
+	defer func() {
+		if bits != nil {
+			bitsetPool.Put(bits)
+		}
+	}()
 	for r, ok := cur.next(); ok; r, ok = cur.next() {
-		if set != nil && set[r/64]&(1<<(r%64)) == 0 {
+		if bits != nil && (*bits)[r/64]&(1<<(r%64)) == 0 {
 			continue
 		}
 		pos := int(wi.order[r])
@@ -175,9 +186,9 @@ func (sr *searcher[T]) walk(p *postings, lo, hi int, covered Tier, filter func(i
 				return false
 			}
 		}
-		if set == nil && tok >= 0 {
+		if bits == nil && filter != nil {
 			// built once the walk gets past the cheap early stops
-			if set = filter(tok); set[r/64]&(1<<(r%64)) == 0 {
+			if bits = wi.union(filter.p, filter.lo, filter.hi); (*bits)[r/64]&(1<<(r%64)) == 0 {
 				continue
 			}
 		}

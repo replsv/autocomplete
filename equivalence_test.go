@@ -54,7 +54,7 @@ func randomQueries(r *rand.Rand, texts []string, n int) []string {
 	for _, t := range texts {
 		words = append(words, strings.Fields(normalize(t))...)
 	}
-	qs := []string{"st", "s", "the", "the night", "a", "an st", "zzqx", "o lupta"}
+	qs := []string{"st", "s", "the", "the night", "a", "an st", "zzqx", "o lupta", "st ka", "lo ri ta", "night xq"}
 	for range n {
 		var b strings.Builder
 		for w := range 1 + r.IntN(4) {
