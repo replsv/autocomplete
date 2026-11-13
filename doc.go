@@ -9,7 +9,7 @@
 //		Author string `searchindex:"true"`
 //	}
 //
-// Tagged fields are string or *string. New reads the tags once, and the search scan never uses reflection.
+// Tagged fields are string or *string. New reads the tags once, and searches never use reflection.
 //
 // # Matching
 //
@@ -27,5 +27,8 @@
 //
 // Searches are lock-free: writers serialize on a mutex, build a new snapshot and swap it in atomically, so a
 // search sees the index before or after a write, never a mix. Snapshots are made of chunks of 256 items, and a
-// write copies only the chunks it touches. [WithMaxItems] and [WithMaxFieldBytes] bound what the index can hold.
+// write copies only the chunks it touches. A sorted word table with posting lists, ordered by item score, finds
+// the candidates of a query; the items written since it was built are scanned until there are more than
+// max(1024, n/16) of them, and then the write that crosses that line rebuilds it. [WithMaxItems] and
+// [WithMaxFieldBytes] bound what the index can hold.
 package autocomplete

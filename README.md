@@ -7,6 +7,7 @@ An in-memory search-as-you-type index for Go, over the string fields of your own
 - Ranked by match tier, then a per-field boost plus your own per-item score, with a deterministic tie break.
 - Highlight ranges per field, as rune offsets into the original text.
 - Lock-free searches; rebuilds and updates swap an immutable snapshot.
+- An inverted word index: a search costs what its candidates cost, not a pass over the whole index.
 - Bounded memory: item count and field length limits, copy-on-write updates in 256-item chunks.
 - One dependency: `golang.org/x/text`.
 
@@ -60,8 +61,8 @@ an error wrapping `ErrInvalidTag`; no tagged field (or a `T` that is not a struc
 `ErrNoID`. Fields promoted from embedded structs and embedded struct pointers are supported. `T` may be a struct
 or a pointer to a struct; a nil `*string`, a nil embedded pointer or a nil item indexes as an empty field.
 
-Writes read the tagged fields with `reflect`, once per item. The search scan only touches the normalized copies;
-reflection is used again only to highlight the few results returned.
+Writes read the tagged fields with `reflect`, once per item. Searches only touch the word index and the
+normalized copies; reflection is used again only to highlight the few results returned.
 
 ## Matching and ranking
 
@@ -164,75 +165,114 @@ index keeps matching the indexed text, and drops the highlight ranges of a field
 
 ## Memory model
 
-A snapshot is a list of chunks of 256 entries. Each chunk holds:
+A snapshot is a list of chunks of 256 entries plus a word index. Each chunk holds:
 
 - the items (`T` by value), their ids (sharing the item's bytes when the id is a tagged field) and item scores;
-- one 16-byte bloom filter per field, contiguous so the scan stays in cache;
+- one 16-byte bloom filter per field;
 - the normalized fields, packed back to back in one string per chunk, with an 8-byte span per field.
 
-Word lists and offsets are not stored, words are found by scanning the normalized text. The original text is
-not copied: highlights re-normalize it from the item. An id → position map is kept for the writers only.
+The original text is not copied: highlights re-normalize it from the item. An id → position map is kept for the
+writers only.
 
-With the benchmark item (two indexed fields, 56-byte struct) that is about **200-225 bytes per item** on top
-of the item's own strings (`heap-B/item` below).
+**The word index** is flat slices of integers, so the garbage collector does not scan it:
 
-**Updates** copy the chunk list (8 bytes per 256 items) and each chunk they touch, once per call. A single
-upsert at 60k items allocates about 60 KiB instead of copying the whole index. A batch of 100 random ids touches up to 100 chunks (5.6 MiB at 60k); ids that are close together
-share chunks. A removal moves the last item into the hole so every chunk but the last stays full.
+- every distinct normalized word once, sorted, in one string with `uint32` offsets. A query token is a binary
+  search away from its range of words, the words it prefixes;
+- per word, the entries holding it (`any`) and the entries where it leads a field, first or right after a
+  leading article (`lead`): `uint32` ranks, back to back, with one offset per word;
+- the ranks number the entries by descending item score, with a `uint32` rank → position table;
+- a sorted `uint64` hash of every field (and of every field after its article) with its rank.
+
+A search goes through the candidates in rank order, so the best item scores come first, and stops once the
+results are full and the candidates left could only beat them by a tier that has been fully covered already.
+Every query token has to prefix a word of a match, and a field matches at the aligned tier or better only when
+the first token prefixes its leading word. So a search tries, in order: the fields equal to the query (hash);
+for a query of several words, the entries led by the first token as a whole word (the only ones that can match
+at the prefix tier); the entries led by the first token as a prefix (aligned tier and better); then the
+entries holding the rarest token (in order and any order tiers). Each walk is driven by the smaller of two
+sets, the other one, a second token, is a bitset it is filtered through. The posting lists of a token's words
+are merged lazily through a small heap, so a broad prefix such as `st` that stops after a few dozen candidates
+does not pay for its 60k postings; a walk that goes on past 1024 candidates switches to a bitset of the union.
+
+**Updates** copy the chunk list (8 bytes per 256 items) and each chunk they touch, once per call, and leave the
+word index as it is. The positions they write are marked in a bitset over the indexed positions (copied on
+write, n/8 bytes) and in a list; searches skip them in the index and scan them, with their bloom filters, next
+to it, along with the items appended since. Once more than max(1024, n/16) positions are pending, the write
+that crosses the line rebuilds the word index from the normalized text (23.6 ms at 60k items, 86 ms at 200k),
+which is about 6-7 µs per written item amortized. A single upsert at 60k items allocates about 70 KiB. A batch
+of 100 random ids touches up to 100 chunks (5.8 MiB at 60k); ids that are close together share chunks. A
+removal moves the last item into the hole so every chunk but the last stays full.
+
+With the benchmark item (two indexed fields, 56-byte struct) that is about **245-270 bytes per item** on top
+of the item's own strings (`heap-B/item` below), about 45 of them for the word index.
 
 **Builds** hold the old snapshot until the new one is swapped in, so the peak is about two snapshots plus your
-items (`BuildSeq` avoids holding the items separately). `Build` allocates about as much as it retains (see B/op),
-the draft buffers are reused from chunk to chunk.
+items (`BuildSeq` avoids holding the items separately). `Build` allocates about 1.3 times what it retains (see
+B/op): the chunk drafts are reused from chunk to chunk, the index is built with presized slices and radix sorts.
 
-Measured with the benchmark data, sampling `/memory/classes/heap/objects:bytes` during a second `Build`:
+Measured with the benchmark data, sampling `/memory/classes/heap/objects:bytes` during a second `Build`, and
+during a rebuild of the word index alone:
 
-| Items | Items themselves | One snapshot | Peak during a rebuild (excluding the items) |
-| --- | --- | --- | --- |
-| 60k | 7.3 MiB | 12.8 MiB | 25.3 MiB |
-| 200k | 24.0 MiB | 38.1 MiB | 75.9 MiB |
+| Items | Items themselves | One snapshot | Peak during a rebuild (excluding the items) | Peak during a word index rebuild |
+| --- | --- | --- | --- | --- |
+| 60k | 7.3 MiB | 15.5 MiB | 35.1 MiB | 22.5 MiB |
+| 200k | 24.0 MiB | 46.8 MiB | 107.1 MiB | 69.1 MiB |
 
 Set `GOMEMLIMIT` to leave room for two snapshots plus the rest of the process; at 60k items, 150MiB is plenty.
 Use `WithMaxItems` and `WithMaxFieldBytes` to bound what a bad feed can do.
 
 ## Benchmarks
 
-`go test -bench . -benchmem -count=6 -run '^$'`, medians ± 95% confidence interval from `benchstat`. Raw
-output: [bench/results.txt](bench/results.txt).
+`go test -bench . -benchmem -count=6 -run '^$'`, medians ± 95% confidence interval from `benchstat`, before
+(the linear scan over bloom filters) and after the word index, on the same machine; the three rows below the
+line of the search table and the GC were added with the index and run on the old code afterwards. Raw output:
+[bench/results.txt](bench/results.txt), comparison: [bench/compare.txt](bench/compare.txt).
 
-- CPU: AMD Ryzen 7 PRO 7840U w/ Radeon 780M Graphics (a laptop shared with a desktop session, hence the wide
-  intervals on a few rows)
+- CPU: AMD Ryzen 7 PRO 7840U w/ Radeon 780M Graphics (a laptop shared with a desktop session)
 - Go 1.27.3 linux/amd64, `GOMAXPROCS=4`, `GOMEMLIMIT=1GiB`, `GOFLAGS=-p=2`, in a 2 GiB `systemd-run` scope
+  (`MemoryMax=2G`, `MemorySwapMax=0`)
 
 The data is generated in `bench_test.go` with a seeded `math/rand/v2`: titles of one to five words drawn with a
 Zipf distribution from 56 real words (ASCII and diacritics) plus 6000 pseudo-words, a quarter with a leading
 article, half with an alternative title. Common words make `st` match about a quarter of the index, a worst
 case for a two-letter prefix.
 
-| Search | 10k | 60k | 200k | allocs/op |
+| Search | 10k before | 10k after | 60k before | 60k after | 200k before | 200k after |
+| --- | --- | --- | --- | --- | --- | --- |
+| `st` (short prefix) | 174 µs | 12.8 µs | 613 µs | 7.7 µs | 3.46 ms | 8.1 µs |
+| `dark night` (multi-word) | 43 µs | 5.8 µs | 249 µs | 5.3 µs | 826 µs | 6.2 µs |
+| `night dark star` (any order) | 48 µs | 48 µs | 213 µs | 57 µs | 612 µs | 4.6 µs |
+| `pădu inim` (diacritics) | 25 µs | 5.9 µs | 145 µs | 20 µs | 485 µs | 17 µs |
+| `zzqx` (no match) | 16 µs | 0.29 µs | 105 µs | 0.28 µs | 354 µs | 0.27 µs |
+| | | | | | | |
+| `st ka` (two short prefixes) | | | 389 µs | 72 µs | 575 µs | 46 µs |
+| `lo ri ta` (three short prefixes) | | | 170 µs | 96 µs | 554 µs | 292 µs |
+| `night xq` (one rare token) | | | 260 µs | 0.46 µs | 1.03 ms | 0.44 µs |
+
+A search allocates 0.5-10 KiB: the normalized query, the heap of a broad prefix and the results with their
+highlight ranges. With 500 upserts pending at 60k items, `st` takes 15.5 µs, `dark night` 13 µs and `zzqx`
+3.5 µs.
+
+The cost of a search follows how many candidates it has to walk before the results are settled. A query that
+matches nothing, or has one rare word, is a few binary searches. One whose best results are in order or any
+order matches of common short prefixes (`lo ri ta`, or `night dark star` at 10k, where no item has these words
+first) walks every candidate of its rarest token, and is only about twice as fast as a full scan.
+
+| Build | before | after | B/op before | B/op after | retained before | retained after |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10k | 5.30 ms | 9.70 ms | 2.1 MiB | 3.6 MiB | 210 B/item | 263 B/item |
+| 60k | 31.2 ms | 57.0 ms | 12.8 MiB | 20.1 MiB | 223 B/item | 270 B/item |
+| 200k | 113 ms | 218 ms | 38.2 MiB | 60.8 MiB | 200 B/item | 245 B/item |
+
+| Update at 60k | before | after | B/op before | B/op after |
 | --- | --- | --- | --- | --- |
-| `st` (short prefix) | 170 µs ± 4% | 591 µs ± 6% | 3.18 ms ± 6% | 68-72 |
-| `dark night` (multi-word) | 44 µs ± 47% | 223 µs ± 2% | 817 µs ± 4% | 73-74 |
-| `night dark star` (any order) | 48 µs ± 2% | 206 µs ± 1% | 618 µs ± 5% | 74-94 |
-| `pădu inim` (diacritics) | 25 µs ± 1% | 146 µs ± 1% | 488 µs ± 4% | 37-87 |
-| `zzqx` (no match) | 16 µs ± 1% | 101 µs ± 4% | 354 µs ± 1% | 6 |
+| `Upsert` one item | 41.1 µs | 50.5 µs | 59.5 KiB | 69.5 KiB |
+| `Upsert` 100 random items | 4.07 ms | 4.81 ms | 5.6 MiB | 5.8 MiB |
+| `Upsert` a new item, then `Remove` it | 25.8 µs | 26.0 µs | 52.9 KiB | 53.0 KiB |
+| word index rebuild | | 23.6 ms | | 7.2 MiB |
 
-A search allocates 0.5-7 KiB: the normalized query and the results with their highlight ranges.
-
-| Build | time | B/op | allocs/op | retained heap |
-| --- | --- | --- | --- | --- |
-| 10k | 5.27 ms ± 1% | 2.1 MiB | 307 | 210 B/item |
-| 60k | 31.8 ms ± 6% | 12.8 MiB | 1701 | 223 B/item |
-| 200k | 116 ms ± 4% | 38.2 MiB | 5239 | 200 B/item |
-
-| Update at 60k | time | B/op | allocs/op |
-| --- | --- | --- | --- |
-| `Upsert` one item | 41.5 µs ± 2% | 59.5 KiB | 13 |
-| `Upsert` 100 random items | 4.16 ms ± 1% | 5.6 MiB | 816 |
-| `Upsert` a new item, then `Remove` it | 26.6 µs ± 1% | 52.9 KiB | 26 |
-
-Search time grows linearly with the index (the scan is a full pass over the bloom filters), so a two-letter
-prefix over 200k items costs a few milliseconds. Once the top results are full, an item whose best possible
-score cannot beat the last one is only checked for a better tier, which keeps popular prefixes cheap.
+The upsert rows include the word index rebuilds they trigger, amortized. A forced GC with a 200k index live
+takes 3.9-4.0 ms before and after: the index adds no pointers.
 
 ## Examples
 

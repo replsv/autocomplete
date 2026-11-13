@@ -1,0 +1,141 @@
+goos: linux
+goarch: amd64
+pkg: github.com/replsv/autocomplete
+cpu: AMD Ryzen 7 PRO 7840U w/ Radeon 780M Graphics  
+                                 │     old.txt     │               new.txt               │
+                                 │     sec/op      │    sec/op     vs base               │
+Search/n=10k/prefix-4                174.20µ ± 22%   12.79µ ±  2%  -92.66% (p=0.002 n=6)
+Search/n=10k/multiword-4             43.049µ ± 12%   5.751µ ± 73%  -86.64% (p=0.002 n=6)
+Search/n=10k/anyorder-4               47.59µ ±  1%   47.82µ ±  1%        ~ (p=0.310 n=6)
+Search/n=10k/diacritics-4            25.151µ ±  1%   5.873µ ±  1%  -76.65% (p=0.002 n=6)
+Search/n=10k/nomatch-4              16144.0n ±  1%   292.8n ±  2%  -98.19% (p=0.002 n=6)
+Search/n=60k/prefix-4               612.902µ ±  5%   7.688µ ±  1%  -98.75% (p=0.002 n=6)
+Search/n=60k/multiword-4            248.533µ ±  4%   5.305µ ±  2%  -97.87% (p=0.002 n=6)
+Search/n=60k/anyorder-4              213.17µ ±  7%   56.58µ ±  1%  -73.46% (p=0.002 n=6)
+Search/n=60k/diacritics-4            145.20µ ±  3%   20.24µ ±  2%  -86.06% (p=0.002 n=6)
+Search/n=60k/nomatch-4             104864.5n ±  4%   283.3n ±  1%  -99.73% (p=0.002 n=6)
+Search/n=200k/prefix-4             3464.609µ ± 15%   8.080µ ±  1%  -99.77% (p=0.002 n=6)
+Search/n=200k/multiword-4           826.217µ ±  2%   6.218µ ±  1%  -99.25% (p=0.002 n=6)
+Search/n=200k/anyorder-4            611.779µ ± 35%   4.588µ ±  2%  -99.25% (p=0.002 n=6)
+Search/n=200k/diacritics-4           484.72µ ±  5%   17.44µ ±  1%  -96.40% (p=0.002 n=6)
+Search/n=200k/nomatch-4            353725.5n ±  1%   270.9n ±  1%  -99.92% (p=0.002 n=6)
+Build/n=10k-4                         5.295m ±  1%   9.703m ±  1%  +83.26% (p=0.002 n=6)
+Build/n=60k-4                         31.15m ±  1%   57.02m ±  3%  +83.05% (p=0.002 n=6)
+Build/n=200k-4                        113.2m ±  6%   218.3m ±  1%  +92.78% (p=0.002 n=6)
+Upsert/n=60k/single-4                 41.13µ ±  1%   50.52µ ±  2%  +22.83% (p=0.002 n=6)
+Upsert/n=60k/batch100-4               4.068m ±  0%   4.808m ±  2%  +18.19% (p=0.002 n=6)
+Upsert/n=60k/insert-remove-4          25.75µ ±  2%   26.01µ ±  2%   +1.01% (p=0.041 n=6)
+SearchShortTokens/n=60k/two-4                        71.56µ ±  2%
+SearchShortTokens/n=60k/three-4                      95.83µ ±  1%
+SearchShortTokens/n=60k/rare-4                       456.2n ±  1%
+SearchShortTokens/n=200k/two-4                       45.57µ ±  2%
+SearchShortTokens/n=200k/three-4                     292.4µ ±  3%
+SearchShortTokens/n=200k/rare-4                      444.4n ±  1%
+Reindex/n=10k-4                                      4.369m ±  1%
+Reindex/n=60k-4                                      23.56m ±  4%
+Reindex/n=200k-4                                     85.79m ±  5%
+SearchDirty/n=60k/prefix-4                           15.49µ ±  0%
+SearchDirty/n=60k/multiword-4                        12.97µ ±  1%
+SearchDirty/n=60k/nomatch-4                          3.481µ ±  1%
+GC-4                                                 3.976m ±  1%
+geomean                               382.6µ         52.48µ        -91.44%
+
+                                 │   old.txt    │                new.txt                │
+                                 │     B/op     │     B/op      vs base                 │
+Search/n=10k/prefix-4              3.977Ki ± 0%   5.352Ki ± 0%  +34.58% (p=0.002 n=6)
+Search/n=10k/multiword-4           4.148Ki ± 0%   4.148Ki ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=10k/anyorder-4            7.023Ki ± 0%   7.072Ki ± 0%   +0.70% (p=0.002 n=6)
+Search/n=10k/diacritics-4          2.734Ki ± 0%   2.735Ki ± 0%   +0.04% (p=0.002 n=6)
+Search/n=10k/nomatch-4               512.0 ± 0%     512.0 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=60k/prefix-4              3.664Ki ± 0%   5.664Ki ± 0%  +54.58% (p=0.002 n=6)
+Search/n=60k/multiword-4           4.148Ki ± 0%   4.148Ki ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=60k/anyorder-4            5.680Ki ± 0%   5.727Ki ± 0%   +0.83% (p=0.002 n=6)
+Search/n=60k/diacritics-4          7.273Ki ± 0%   7.274Ki ± 0%   +0.01% (p=0.002 n=6)
+Search/n=60k/nomatch-4               512.0 ± 0%     512.0 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=200k/prefix-4             3.414Ki ± 0%   5.414Ki ± 0%  +58.58% (p=0.002 n=6)
+Search/n=200k/multiword-4          4.133Ki ± 0%   4.133Ki ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=200k/anyorder-4           4.648Ki ± 0%   4.695Ki ± 0%   +1.01% (p=0.002 n=6)
+Search/n=200k/diacritics-4         5.367Ki ± 0%   5.367Ki ± 0%        ~ (p=0.455 n=6)
+Search/n=200k/nomatch-4              512.0 ± 0%     512.0 ± 0%        ~ (p=1.000 n=6) ¹
+Build/n=10k-4                      2.053Mi ± 0%   3.647Mi ± 0%  +77.69% (p=0.002 n=6)
+Build/n=60k-4                      12.83Mi ± 0%   20.05Mi ± 0%  +56.34% (p=0.002 n=6)
+Build/n=200k-4                     38.16Mi ± 0%   60.78Mi ± 0%  +59.26% (p=0.002 n=6)
+Upsert/n=60k/single-4              59.47Ki ± 0%   69.45Ki ± 0%  +16.79% (p=0.002 n=6)
+Upsert/n=60k/batch100-4            5.597Mi ± 0%   5.803Mi ± 0%   +3.68% (p=0.002 n=6)
+Upsert/n=60k/insert-remove-4       52.86Ki ± 0%   52.98Ki ± 0%   +0.24% (p=0.002 n=6)
+SearchShortTokens/n=60k/two-4                     7.095Ki ± 0%
+SearchShortTokens/n=60k/three-4                   9.697Ki ± 0%
+SearchShortTokens/n=60k/rare-4                      544.0 ± 0%
+SearchShortTokens/n=200k/two-4                    7.111Ki ± 0%
+SearchShortTokens/n=200k/three-4                  8.765Ki ± 0%
+SearchShortTokens/n=200k/rare-4                     544.0 ± 0%
+Reindex/n=10k-4                                   1.595Mi ± 0%
+Reindex/n=60k-4                                   7.214Mi ± 0%
+Reindex/n=200k-4                                  22.57Mi ± 0%
+SearchDirty/n=60k/prefix-4                        5.664Ki ± 0%
+SearchDirty/n=60k/multiword-4                     4.148Ki ± 0%
+SearchDirty/n=60k/nomatch-4                         512.0 ± 0%
+GC-4                                                0.000 ±  ?
+geomean                            17.75Ki                      +14.81%               ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                                 │   old.txt   │               new.txt                │
+                                 │  allocs/op  │  allocs/op   vs base                 │
+Search/n=10k/prefix-4               72.00 ± 0%    73.00 ± 0%   +1.39% (p=0.002 n=6)
+Search/n=10k/multiword-4            74.00 ± 0%    74.00 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=10k/anyorder-4             94.00 ± 0%    95.00 ± 0%   +1.06% (p=0.002 n=6)
+Search/n=10k/diacritics-4           37.00 ± 0%    37.00 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=10k/nomatch-4              6.000 ± 0%    6.000 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=60k/prefix-4               71.00 ± 0%    72.00 ± 0%   +1.41% (p=0.002 n=6)
+Search/n=60k/multiword-4            74.00 ± 0%    74.00 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=60k/anyorder-4             80.00 ± 0%    81.00 ± 0%   +1.25% (p=0.002 n=6)
+Search/n=60k/diacritics-4           87.00 ± 0%    87.00 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=60k/nomatch-4              6.000 ± 0%    6.000 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=200k/prefix-4              68.00 ± 0%    69.00 ± 0%   +1.47% (p=0.002 n=6)
+Search/n=200k/multiword-4           73.00 ± 0%    73.00 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=200k/anyorder-4            74.00 ± 0%    75.00 ± 0%   +1.35% (p=0.002 n=6)
+Search/n=200k/diacritics-4          76.00 ± 0%    76.00 ± 0%        ~ (p=1.000 n=6) ¹
+Search/n=200k/nomatch-4             6.000 ± 0%    6.000 ± 0%        ~ (p=1.000 n=6) ¹
+Build/n=10k-4                       307.0 ± 0%    367.5 ± 0%  +19.71% (p=0.002 n=6)
+Build/n=60k-4                      1.701k ± 0%   1.765k ± 0%   +3.76% (p=0.002 n=6)
+Build/n=200k-4                     5.239k ± 0%   5.307k ± 0%   +1.30% (p=0.002 n=6)
+Upsert/n=60k/single-4               13.00 ± 0%    15.00 ± 0%  +15.38% (p=0.002 n=6)
+Upsert/n=60k/batch100-4             816.0 ± 0%    827.0 ± 0%   +1.35% (p=0.002 n=6)
+Upsert/n=60k/insert-remove-4        26.00 ± 0%    26.00 ± 0%        ~ (p=1.000 n=6) ¹
+SearchShortTokens/n=60k/two-4                     75.00 ± 0%
+SearchShortTokens/n=60k/three-4                   98.00 ± 0%
+SearchShortTokens/n=60k/rare-4                    6.000 ± 0%
+SearchShortTokens/n=200k/two-4                    76.00 ± 0%
+SearchShortTokens/n=200k/three-4                  89.00 ± 0%
+SearchShortTokens/n=200k/rare-4                   6.000 ± 0%
+Reindex/n=10k-4                                   60.00 ± 0%
+Reindex/n=60k-4                                   63.00 ± 0%
+Reindex/n=200k-4                                  63.00 ± 0%
+SearchDirty/n=60k/prefix-4                        72.00 ± 0%
+SearchDirty/n=60k/multiword-4                     74.00 ± 0%
+SearchDirty/n=60k/nomatch-4                       6.000 ± 0%
+GC-4                                              0.000 ± 0%
+geomean                             75.93                      +2.24%               ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+               │   old.txt   │              new.txt               │
+               │ heap-B/item │ heap-B/item  vs base               │
+Build/n=10k-4     209.9 ± 0%    263.4 ± 0%  +25.49% (p=0.002 n=6)
+Build/n=60k-4     223.0 ± 0%    270.0 ± 0%  +21.08% (p=0.002 n=6)
+Build/n=200k-4    199.5 ± 0%    245.2 ± 0%  +22.91% (p=0.002 n=6)
+geomean           210.6         259.3       +23.14%
+
+# Benchmarks added on the branch, run on main afterwards with the same settings (old_extra.txt)
+
+                                 │      sec/op      │   sec/op     vs base               │
+SearchShortTokens/n=60k/two-4         389.07µ ±  4%   71.56µ ± 2%  -81.61% (p=0.002 n=6)
+SearchShortTokens/n=60k/three-4       170.01µ ± 50%   95.83µ ± 1%  -43.63% (p=0.002 n=6)
+SearchShortTokens/n=60k/rare-4      260115.0n ±  1%   456.2n ± 1%  -99.82% (p=0.002 n=6)
+SearchShortTokens/n=200k/two-4        574.80µ ±  1%   45.57µ ± 2%  -92.07% (p=0.002 n=6)
+SearchShortTokens/n=200k/three-4       553.6µ ±  1%   292.4µ ± 3%  -47.18% (p=0.002 n=6)
+SearchShortTokens/n=200k/rare-4    1029063.5n ±  2%   444.4n ± 1%  -99.96% (p=0.002 n=6)
+GC-4                                   3.862m ±  2%   3.976m ± 1%   +2.95% (p=0.002 n=6)
+geomean                                578.8µ         35.68µ       -93.83%
+
